@@ -93,10 +93,10 @@ export class Nostr extends EventEmitter {
       this.emit('ready')
     })
     this.ndk.pool.on('relay:connect', (relay: NDKRelay) => {
-      // console.debug(`🔌 connected to relay: ${relay.url}`)
+      console.debug(`🔌 connected to relay: ${relay.url}`)
     })
     this.ndk.pool.on('relay:connecting', (relay: NDKRelay) => {
-      // console.debug(`🔗 connecting to relay: ${relay.url}...`)
+      console.debug(`🔗 connecting to relay: ${relay.url}...`)
     })
     this.ndk.pool.on('relay:disconnect', (relay: NDKRelay) => {
       console.debug(`🚨 disconnected from relay: ${relay.url}`)
@@ -105,7 +105,7 @@ export class Nostr extends EventEmitter {
       console.debug(`🔑 relay ${relay.url} requires auth. Challenge: ${challenge}`)
     })
     this.ndk.outboxPool?.on('relay:connect', (relay: NDKRelay) => {
-      // console.log(`🎉 connected to outbox relay: ${relay.url}`)
+      console.log(`🎉 connected to outbox relay: ${relay.url}`)
     })
 
     const { relays } = this.options
@@ -129,16 +129,16 @@ export class Nostr extends EventEmitter {
       this.users.set(user.pubkey, user)
       getRelayListForUser(user.pubkey, this.ndk).then((relayList: NDKRelayList | undefined) => {
         if (relayList) {
-          // console.log(`🌐 Relay list for [${user.pubkey}]: `, relayList.tags.map(r => r[1]), `, from event: ${relayList.id} - [${relayList.created_at}]`)
+          console.log(`🌐 Relay list for [${user.pubkey}]: `, relayList.tags.map(r => r[1]), `, from event: ${relayList.id} - [${relayList.created_at}]`)
           for (const relayUrl of relayList.relays) {
             this.mustKeepRelays.add(relayUrl)
             const ndkRelay = new NDKRelay(relayUrl, undefined, this.ndk)
             this.ndk.pool.addRelay(ndkRelay, true)
             this.ndk.outboxPool?.addRelay(ndkRelay, true)
           }
-          // console.log(`Must keep relays: `, this.mustKeepRelays)
         } else {
-          console.warn(`🚨 No relay list for user [${user.pubkey}]`)
+          console.warn(`🚨 No relay list for user [${user.pubkey}], adding default relay`)
+          this.ndk.pool.addRelay(new NDKRelay('wss://relay.mostro.network', undefined, this.ndk), true)
         }
       })
     }
@@ -205,7 +205,7 @@ export class Nostr extends EventEmitter {
   }
 
   private async _queueGiftWrapEvent(event: NDKEvent) {
-    console.log('🎁 queueing gift wrap event')
+    // console.log('🎁 queueing gift wrap event')
     this.giftWrapQueue.push(event)
     if (this.giftWrapEoseReceived) {
       await this._processQueuedGiftWraps()
@@ -344,7 +344,7 @@ export class Nostr extends EventEmitter {
     try {
       const poolSize = this.ndk.pool.size()
       const relays = await event.publish()
-      console.log(`📡 Event published to [${relays.size}/${poolSize}] relays`)
+      // console.log(`📡 Event published to [${relays.size}/${poolSize}] relays`)
     } catch (err) {
       console.error('Error publishing event: ', err)
     }
@@ -552,7 +552,7 @@ export class Nostr extends EventEmitter {
     event.pubkey = myPubKey
     event.tags = [['p', mostroPubKey]]
     const nEvent = await event.toNostrEvent()
-    console.info('> [🎁][me -> 🧌]: ', cleartext, ', ev: ', nEvent)
+    // console.info('> [🎁][me -> 🧌]: ', cleartext, ', ev: ', nEvent)
     return await this.signAndPublishEvent(event)
   }
 }

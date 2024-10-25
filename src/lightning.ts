@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'fs'
-import { authenticatedLndGrpc, createInvoice, CreateInvoiceResult } from 'lightning'
+import { authenticatedLndGrpc, createInvoice, payViaPaymentRequest, CreateInvoiceResult } from 'lightning'
 import * as path from 'path'
 
 const certPath = path.resolve(__dirname, '../lnd/tls.cert')
@@ -40,4 +40,11 @@ export const getInvoice = async (tokens: number, expirySeconds: number = 3600, m
     expires_at: expiresAt
   })
   return invoice
+}
+
+export const payInvoice = async (paymentRequest: string) => {
+  return payViaPaymentRequest({
+    lnd: lnd,
+    request: paymentRequest
+  })
 }

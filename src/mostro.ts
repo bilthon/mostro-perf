@@ -7,6 +7,14 @@ import { useMessages } from './stores/messages'
 import { useMostroStore } from './stores/mostro'
 import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage } from './types'
 
+const REQUEST_TIMEOUT = 30000 // 30 seconds timeout
+
+interface PendingRequest {
+  resolve: (value: MostroMessage) => void
+  reject: (reason: any) => void
+  timer: NodeJS.Timeout
+}
+
 export type MostroEvent = NDKEvent
 
 type MostroOptions = {
@@ -39,6 +47,9 @@ export class Mostro extends EventEmitter<{
   private readyResolve!: () => void
   private readyPromise: Promise<void>
 
+  private pendingRequests: Map<number, PendingRequest> = new Map()
+  private nextRequestId: number = 1
+
   constructor(opts: MostroOptions) {
     super()
     this.mostro = opts.mostroPubKey
@@ -56,6 +67,57 @@ export class Mostro extends EventEmitter<{
 
     // Wait for Nostr to be ready
     this.nostr.on('ready', this.onNostrReady.bind(this))
+  }
+
+  async waitForAction(action: Action, orderId: string, timeout: number = 60000): Promise<MostroMessage> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeListener('mostro-message', handler);
+        reject(new Error(`Timeout waiting for action ${action} for order ${orderId}`));
+      }, timeout);
+
+      const handler = (mostroMessage: MostroMessage, _ev: NDKEvent) => {
+        if (mostroMessage.order && 
+            mostroMessage.order.action === action && 
+            mostroMessage.order.id === orderId) {
+          clearTimeout(timer);
+          this.removeListener('mostro-message', handler);
+          resolve(mostroMessage);
+        } else {
+          console.warn(`Received unexpected action ${mostroMessage.order?.action} for order ${mostroMessage.order?.id}`)
+        }
+      };
+
+      this.on('mostro-message', handler);
+    });
+  }
+
+  private getNextRequestId(): number {
+    return this.nextRequestId++
+  }
+
+  private createPendingRequest(): [number, Promise<MostroMessage>] {
+    const requestId = this.getNextRequestId()
+    let resolver: ((value: MostroMessage) => void) | undefined
+    let rejecter: ((reason: any) => void) | undefined
+
+    const promise = new Promise<MostroMessage>((resolve, reject) => {
+      resolver = resolve
+      rejecter = reject
+    })
+
+    const timer = setTimeout(() => {
+      this.pendingRequests.delete(requestId)
+      rejecter!(new Error('Request timed out'))
+    }, REQUEST_TIMEOUT)
+
+    this.pendingRequests.set(requestId, {
+      resolve: resolver!,
+      reject: rejecter!,
+      timer
+    })
+
+    return [requestId, promise]
   }
 
   async connect() {
@@ -245,7 +307,7 @@ export class Mostro extends EventEmitter<{
           if (plaintext.includes('dispute')) {
             // console.info(`<<<< [🧌 -> me] created at: ${new Date(ev.created_at as number * 1E3)},[${ev.id}] msg: ${plaintext}`)
           }
-          console.info('< [🧌 -> me]: ', plaintext, ', ev: ', nEvent)
+          // console.info('< [🧌 -> me]: ', plaintext, ', ev: ', nEvent)
           const msg = { ...JSON.parse(plaintext), created_at: ev.created_at }
           this.messageStore.addMostroMessage({ message: msg, event: ev as MostroEvent})
         } else {
@@ -276,129 +338,92 @@ export class Mostro extends EventEmitter<{
     const mostroMessage = JSON.parse(message) as MostroMessage
     const date = (new Date(ev.created_at as number * 1E3)).getTime()
     const now = new Date().getTime()
-    console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
+    // console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
     this.messageStore.addMostroMessage({ message: mostroMessage, event: ev })
     this.emit('mostro-message', mostroMessage, ev)
+
+    // Check if this message is a response to a pending request
+    const requestId = mostroMessage.order?.request_id
+    if (requestId && this.pendingRequests.has(requestId)) {
+      const { resolve, timer } = this.pendingRequests.get(requestId)!
+      clearTimeout(timer)
+      this.pendingRequests.delete(requestId)
+      resolve(mostroMessage)
+    }
+  }
+
+  private async sendMostroRequest(action: Action, payload: any): Promise<MostroMessage> {
+    const [requestId, promise] = this.createPendingRequest()
+    const fullPayload = {
+      order: {
+        version: 1,
+        request_id: requestId,
+        action,
+        ...payload
+      }
+    }
+    await this.nostr.createAndPublishMostroEvent(fullPayload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return promise
   }
 
   async submitOrder(order: NewOrder) {
-    const payload = {
-      order: {
-        version: 1,
-        action: Action.NewOrder,
-        content: {
-          order: order
-        }
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.NewOrder, {
+      content: { order }
+    })
   }
 
   async takeSell(order: Order, amount?: number | undefined) {
-    const payload = {
-      order: {
-        version: 1,
-        id: order.id,
-        action: Action.TakeSell,
-        content: amount ? {
-            amount: amount
-          } : null
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.TakeSell, {
+      id: order.id,
+      content: amount ? { amount } : null
+    })
   }
 
   async takeBuy(order: Order, amount?: number | undefined) {
-    const payload = {
-      order: {
-        version: 1,
-        id: order.id,
-        action: Action.TakeBuy,
-        content: amount ? {
-          amount: amount
-        } : null
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
-  }
+    return this.sendMostroRequest(Action.TakeBuy, {
+      id: order.id,
+      content: amount ? { amount } : null
+    })  }
 
   async addInvoice(order: Order, invoice: string, amount: number | null = null) {
-    const payload = {
-      order: {
-        version: 1,
-        id: order.id,
-        action: Action.AddInvoice,
-        content: {
-          payment_request: [
-            null,
-            invoice,
-            amount
-          ]
-        }
+    return this.sendMostroRequest(Action.AddInvoice, {
+      id: order.id,
+      content: {
+        payment_request: [null, invoice, amount]
       }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
-  }
+    })  }
 
   async release(order: Order) {
-    const payload = {
-      order: {
-        version: 1,
-        id: order.id,
-        action: Action.Release,
-        content: null,
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
-  }
+    return this.sendMostroRequest(Action.Release, {
+      id: order.id,
+      content: null
+    })  }
 
   async fiatSent(order: Order) {
-    const payload = {
-      order: {
-        version: 1,
-        action: Action.FiatSent,
-        id: order.id
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.FiatSent, {
+      id: order.id
+    })
   }
 
   async rateUser(order: Order, rating: number) {
-    const payload = {
-      order: {
-        version: 1,
-        id: order.id,
-        action: Action.RateUser,
-        content: {
-          rating_user: rating
-        }
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.RateUser, {
+      id: order.id,
+      content: { rating_user: rating }
+    })
   }
 
   async dispute(order: Order) {
-    const payload = {
-      order: {
-        version: 1,
-        action: Action.Dispute,
-        id: order.id,
-        content: null,
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.Dispute, {
+      id: order.id,
+      content: null
+    })
   }
 
   async cancel(order: Order) {
-    const payload = {
-      order: {
-        version: 1,
-        action: Action.Cancel,
-        id: order.id,
-        content: null,
-      }
-    }
-    await this.nostr.createAndPublishMostroEvent(payload, this.getMostroPublicKey(PublicKeyType.HEX))
+    return this.sendMostroRequest(Action.Cancel, {
+      id: order.id,
+      content: null
+    })
   }
 
   async submitDirectMessage(message: string, npub: string, replyTo: string | undefined): Promise<void> {

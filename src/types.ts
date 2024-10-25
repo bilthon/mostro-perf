@@ -37,6 +37,7 @@ export type MostroMessage = {
   order: {
     version: number,
     id: string,
+    request_id: number,
     action: Action,
     content: {
       payment_request?: PaymentRequest,

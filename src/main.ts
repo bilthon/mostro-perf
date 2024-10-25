@@ -1,41 +1,22 @@
 import 'websocket-polyfill'
 import 'dotenv/config'
-import { nip19, getPublicKey } from 'nostr-tools'
-import { Mostro, MostroEvent } from './mostro'
-import { MostroMessage, NewOrder, Order, OrderStatus, OrderType } from './types'
+import { nip19, getPublicKey, generateSecretKey } from 'nostr-tools'
+import { Mostro } from './mostro'
+import { Action, MostroMessage, NewOrder, Order, OrderStatus, OrderType } from './types'
+import { getInvoice, payInvoice } from './lightning'
 
 const time = console.time
 const timeEnd = console.timeEnd
 
 // const MOSTRO_NPUB = 'npub19m9laul6k463czdacwx5ta4ap43nlf3lr0p99mqugnz8mdz7wtvskkm5wg'
-const MOSTRO_NPUB = 'npub1pjzttkjtvtav98dck549ghut6wn72p8tylfptcmgfjkw47ay2fzszwkfyt'
+const MOSTRO_NPUB = 'npub12z33fmw0stukyz4gx97l7taenxyylsydcn62hretgzzd7z6zu4qsal6xsa'
 // const RELAYS = 'wss://nostr.roundrockbitcoiners.com,wss://relay.mostro.network,wss://relay.nostr.net,wss://nostr.mutinywallet.com,wss://relay.piazza.today,wss://nostr.lu.ke'
 // const RELAYS = 'wss://relay.mostro.network,wss://algo.bilthon.dev'
-const RELAYS = 'wss://rnostr.bilthon.dev'
+const RELAYS = 'wss://nostr.bilthon.dev'
 
 // Private keys
-const buyerPrivateKey = 'f3587ff35141123e17dfad04d1bdcc9acd2f5a25cf81ae6baf6c1557dd4cbbe9'
-const sellerPrivateKey = '9c283f96cbfb051f22e9e87198002c226f3b72416e6cc0dd14c50455996dfea7'
-
-const RESPONSE_TIMEOUT_MS = 120000 // 120 seconds
-
-function createResponsePromise(mostro: Mostro, timeoutMs: number = RESPONSE_TIMEOUT_MS): Promise<MostroMessage> {
-  return new Promise<MostroMessage>((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      mostro.off('mostro-message', messageHandler)
-      reject(new Error('Response timeout'))
-    }, timeoutMs)
-
-    const messageHandler = (mostroMessage: MostroMessage, ev: MostroEvent) => {
-      clearTimeout(timeoutId)
-      console.log('🚀 ~ Got response:', mostroMessage)
-      mostro.off('mostro-message', messageHandler)
-      resolve(mostroMessage)
-    }
-
-    mostro.on('mostro-message', messageHandler)
-  })
-}
+const buyerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
+const sellerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
 
 async function waitSeconds(seconds: number) {
   let counter = 0
@@ -49,9 +30,9 @@ async function waitSeconds(seconds: number) {
 
 async function main() {
   try {
-    console.log(`🔑 mostro pubkey: ${nip19.decode(MOSTRO_NPUB).data}`)
-    console.log(`🔑 buyer keys\nprivate: ${buyerPrivateKey},\npublic: ${getPublicKey(Buffer.from(buyerPrivateKey, 'hex'))}`)
-    console.log(`🔑 seller keys\nprivate: ${sellerPrivateKey},\npublic: ${getPublicKey(Buffer.from(sellerPrivateKey, 'hex'))}`)
+    console.log(`🔑 mostro pubkey.... [${nip19.decode(MOSTRO_NPUB).data}]`)
+    console.log(`🔑 buyer keys....... [private: ${buyerPrivateKey}, public: ${getPublicKey(Buffer.from(buyerPrivateKey, 'hex'))}]`)
+    console.log(`🔑 seller keys...... [private: ${sellerPrivateKey}, public: ${getPublicKey(Buffer.from(sellerPrivateKey, 'hex'))}]`)
   
     let order: Order | undefined
 
@@ -73,55 +54,126 @@ async function main() {
     sellerMostro.updatePrivKey(sellerPrivateKey)
 
     console.log('Waiting for 5 seconds before creating order...')
-    await new Promise(resolve => setTimeout(resolve, 5000))
+    await waitSeconds(5)
   
     // Create an order
     const testOrder: NewOrder = {
       kind: OrderType.SELL,
-      fiat_code: 'USD',
+      fiat_code: 'PEN',
       amount: 0,
       fiat_amount: 0,
-      min_amount: 1,
-      max_amount: 21,
+      min_amount: 5,
+      max_amount: 22,
       payment_method: 'cashapp',
-      premium: 10,
+      premium: 5,
       created_at: Date.now(),
       status: OrderStatus.PENDING,
     }
   
     console.log('Submitting order...')
-    const submitOrderPromise = createResponsePromise(buyerMostro)
-    await buyerMostro.submitOrder(testOrder)
-
-    console.log('Waiting for the response after submitting order...')
     let response: MostroMessage
     try {
-      response = await submitOrderPromise
+      time('> submit_order')
+      response = await sellerMostro.submitOrder(testOrder)
+      timeEnd('> submit_order')
+      // console.log('[🎁][🧌 -> me] :', response)
     } catch (error) {
-      console.error('Error waiting for submit order response:', error)
-      return // or handle the error as appropriate
+      console.error('Error submitting order:', error)
+      return
     }
 
+    let sats: number | undefined
     if (response && response.order && response.order.content && response.order.content.order) {
       order = response.order.content.order
       console.log('Taking sell...')
-      const takeSellPromise = createResponsePromise(buyerMostro)
-      time('take_sell')
-      await buyerMostro.takeSell(response.order.content.order, 20)
       try {
-        response = await takeSellPromise
+        time('> take_sell')
+        response = await buyerMostro.takeSell(order, 15)
+        timeEnd('> take_sell')
+        sats = response.order.content.order?.amount
+        // console.log('[🎁][🧌 -> me] :', JSON.stringify(response))
       } catch (error) {
-        console.error('Error waiting for take sell response:', error)
-        return // or handle the error as appropriate
+        console.error('Error taking sell:', error)
+        return
       }
-      timeEnd('take_sell')
     } else {
       console.warn('Got an unexpected response: ', response)
+      return
     }
-    timeEnd('submit_order')
 
-    // const invoice = getInvoice()
-    // await buyerMostro.addInvoice(order, invoice, null)
+    // Fetching invoice
+    let invoice: string | undefined
+    if (sats) {
+      time('> fetch_invoice')
+      const invoiceResult = await getInvoice(sats)
+      timeEnd('> fetch_invoice')
+      invoice = invoiceResult.request
+    } else {
+      console.warn('No sats to fetch invoice')
+      return
+    }
+
+    // Add invoice
+    time('> add_invoice')
+    buyerMostro.addInvoice(order, invoice, sats)
+      .then(res => {
+        timeEnd('> add_invoice')
+      })
+      .catch(err => {
+        console.error('Error adding invoice:', err)
+        return
+      })
+
+
+    // Wait for PayInvoice action from Mostro
+    let invoiceToPay: string | undefined
+    time('wait_for_pay_invoice')
+    try {
+      const payInvoiceMessage = await sellerMostro.waitForAction(Action.PayInvoice, order.id, 120000)
+      if (payInvoiceMessage.order.content && payInvoiceMessage.order.content.payment_request) {
+        invoiceToPay = payInvoiceMessage.order.content.payment_request[1] as string
+      } else {
+        console.warn('Got an unexpected response: ', payInvoiceMessage)
+        return
+      }
+    } catch (error) {
+      console.error('Error waiting for PayInvoice action:', error)
+      return
+    }
+    timeEnd('wait_for_pay_invoice')
+
+    // Pay hodl invoice
+    payInvoice(invoiceToPay).then(res => {
+      console.log('Payment settled!')
+    }).catch(err => {
+      console.error('Error paying invoice:', err)
+      return
+    })
+
+    // Waiting for seller confirmation
+    const sellerConfirmationMsg = await sellerMostro.waitForAction(Action.BuyerTookOrder, order.id, 120000)
+    // Waiting for buyer confirmation
+    const buyerConfirmationMsg = await buyerMostro.waitForAction(Action.HoldInvoicePaymentAccepted, order.id, 120000)
+
+    // Send fiatsent
+    try {
+      time('> fiatsent')
+      await buyerMostro.fiatSent(order)
+      timeEnd('> fiatsent')
+    } catch (error) {
+      console.error('Error sending fiatsent:', error)
+      return
+    }
+
+    // Send release
+    try {
+      time('> release')
+      await sellerMostro.release(order)
+      timeEnd('> release')
+    } catch (error) {
+      console.error('Error sending release:', error)
+      return
+    }
   } catch (err) {
     console.error('Error:', err)
   }
