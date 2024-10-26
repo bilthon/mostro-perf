@@ -13,8 +13,8 @@ const timeEnd = console.timeEnd
 const MOSTRO_NPUB = 'npub1dnsaeuyhwp2mtlttaqu6ulxuqg8gcpc2tdhu5qv9wfxjh5al0cfqqd59x3'
 // const RELAYS = 'wss://nostr.roundrockbitcoiners.com,wss://relay.mostro.network,wss://relay.nostr.net,wss://nostr.mutinywallet.com,wss://relay.piazza.today,wss://nostr.lu.ke'
 // const RELAYS = 'wss://relay.mostro.network,wss://algo.bilthon.dev'
-const RELAYS = 'wss://nostr.roundrockbitcoiners.com'
-const CSV_FILE = 'mostro-rtt.csv'
+const RELAYS = 'wss://nostr.roundrockbitcoiners.com,wss://relay.mostro.network,wss://nostr.bilthon.dev'
+const CSV_FILE = './output/mostro-rtt.csv'
 
 // Private keys
 const buyerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
