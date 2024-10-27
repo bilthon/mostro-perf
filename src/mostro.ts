@@ -1,10 +1,7 @@
 import { EventEmitter } from 'tseep'
 import { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
-import { Nostr, NOSTR_ENCRYPTED_DM_KIND, NOSTR_REPLACEABLE_EVENT_KIND } from './nostr'
-import { useOrders } from './stores/orders'
-import { useMessages } from './stores/messages'
-import { useMostroStore } from './stores/mostro'
+import { Nostr } from './nostr'
 import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage } from './types'
 
 const REQUEST_TIMEOUT = 30000 // 30 seconds timeout
@@ -34,15 +31,14 @@ export enum PublicKeyType {
 }
 
 export class Mostro extends EventEmitter<{
-  'mostro-message': (mostroMessage: MostroMessage, ev: NDKEvent) => void
+  'mostro-message': (mostroMessage: MostroMessage, ev: NDKEvent) => void,
+  'order-update': (order: Order, ev: NDKEvent) => void,
+  'info-update': (info: MostroInfo) => void
 }> {
   mostro: string
   nostr: Nostr
   orderMap = new Map<string, string>() // Maps order id -> event id
   pubkeyCache: PublicKeyCache = { npub: null, hex: null }
-  orderStore: ReturnType<typeof useOrders>
-  messageStore: ReturnType<typeof useMessages>
-  mostroStore = useMostroStore()
 
   private readyResolve!: () => void
   private readyPromise: Promise<void>
@@ -53,15 +49,12 @@ export class Mostro extends EventEmitter<{
   constructor(opts: MostroOptions) {
     super()
     this.mostro = opts.mostroPubKey
-    this.orderStore = useOrders()
-    this.messageStore = useMessages()
 
     this.nostr = new Nostr({ relays: opts.relays, mostroPubKey: opts.mostroPubKey })
 
     // Register Mostro-specific event handlers
-    this.nostr.registerEventHandler(NOSTR_REPLACEABLE_EVENT_KIND, this.handlePublicEvent.bind(this));
-    this.nostr.registerEventHandler(NOSTR_ENCRYPTED_DM_KIND, this.handlePrivateEvent.bind(this));
-    this.nostr.registerToMostroMessage(this.handleMostroMessage.bind(this));
+    this.nostr.registerToPublicMessage(this.handlePublicMessage.bind(this))
+    this.nostr.registerToMostroMessage(this.handleMostroMessage.bind(this))
 
     this.readyPromise = new Promise(resolve => this.readyResolve = resolve)
 
@@ -232,7 +225,7 @@ export class Mostro extends EventEmitter<{
     }
   }
 
-  async handlePublicEvent(ev: NDKEvent) {
+  async handlePublicMessage(ev: NDKEvent) {
     const nEvent = await ev.toNostrEvent()
     // Create a map from the tags array for easy access
     const tags = new Map<string, string | number[]>(ev.tags as [string, string | number[]][])
@@ -244,16 +237,19 @@ export class Mostro extends EventEmitter<{
       // console.info('< [🧌 -> 📢]', JSON.stringify(order), ', ev: ', nEvent)
       if (this.orderMap.has(order.id)) {
         // Updates existing order
-        this.orderStore.updateOrder(order, true)
+        this.emit('order-update', order, ev)
+        // this.orderStore.updateOrder(order, true)
       } else {
         // Adds new order
-        this.orderStore.addOrder({ order: order, event: ev as MostroEvent })
+        // this.orderStore.addOrder({ order: order, event: ev as MostroEvent })
         this.orderMap.set(order.id, ev.id)
+        this.emit('order-update', order, ev)
       }
     } else if (z === 'info') {
       // Info
       const info = this.extractInfoFromEvent(ev)
-      this.mostroStore.addMostroInfo(info)
+      // this.mostroStore.addMostroInfo(info)
+      this.emit('info-update', info)
       // console.info('< [🧌 -> 📢]', JSON.stringify(info), ', ev: ', nEvent)
     } else if (z === 'dispute') {
       console.info('< [🧌 -> 📢]', 'dispute', ', ev: ', nEvent)
@@ -273,63 +269,6 @@ export class Mostro extends EventEmitter<{
     }
   }
 
-  async handlePrivateEvent(ev: NDKEvent) {
-    // Handle Mostro-specific private events (direct messages)
-    const plaintext = await this.nostr.decryptMessage(ev);
-    // console.log(`>>>> handlePrivateEvent, created at: ${new Date(ev.created_at as number * 1E3)}, ev: ${ev.id}`)
-    const myPubKey = this.pubkeyCache.hex
-    const nEvent = await ev.toNostrEvent()
-    const mostroPubKey = nip19.decode(this.mostro).data
-    const { sender, recipient } = this.nostr.obtainParties(ev)
-    if (sender.pubkey === myPubKey) {
-      // DMs I created
-      try {
-        const [[, recipientPubKey]] = ev.tags
-        if (recipientPubKey === mostroPubKey)
-          console.log('< [me -> 🧌]: ', plaintext, ', ev: ', nEvent)
-        else
-          console.log('< [me -> 🍐]: ', plaintext, ', ev: ', nEvent)
-        const peerNpub = nip19.npubEncode(recipientPubKey)
-        this.messageStore.addPeerMessage({
-          id: ev.id,
-          text: plaintext,
-          peerNpub: peerNpub,
-          sender: 'me',
-          created_at: ev.created_at || 0
-        })
-      } catch (err) {
-        console.error('Error while decrypting message: ', err)
-      }
-    } else if (recipient.pubkey === myPubKey) {
-      // DMs I received
-      try {
-        if (ev.pubkey === mostroPubKey && this.isJsonObject(plaintext)) {
-          if (plaintext.includes('dispute')) {
-            // console.info(`<<<< [🧌 -> me] created at: ${new Date(ev.created_at as number * 1E3)},[${ev.id}] msg: ${plaintext}`)
-          }
-          // console.info('< [🧌 -> me]: ', plaintext, ', ev: ', nEvent)
-          const msg = { ...JSON.parse(plaintext), created_at: ev.created_at }
-          this.messageStore.addMostroMessage({ message: msg, event: ev as MostroEvent})
-        } else {
-          console.info('< [🍐 -> me]: ', plaintext, ', ev: ', nEvent)
-          // Peer DMs
-          const peerNpub = nip19.npubEncode(ev.pubkey)
-          this.messageStore.addPeerMessage({
-            id: ev.id,
-            text: plaintext,
-            peerNpub: peerNpub,
-            sender: 'other',
-            created_at: ev.created_at || 0
-          })
-        }
-      } catch (err) {
-        console.error('Error while trying to decode DM: ', err)
-      }
-    } else {
-      console.warn(`<< Ignoring DM for key: ${recipient.pubkey}, my pubkey is ${myPubKey}`)
-    }
-  }
-
   /**
    * Handle messages from Mostro
    * @param message - The message content
@@ -338,8 +277,7 @@ export class Mostro extends EventEmitter<{
     const mostroMessage = JSON.parse(message) as MostroMessage
     const date = (new Date(ev.created_at as number * 1E3)).getTime()
     const now = new Date().getTime()
-    // console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
-    this.messageStore.addMostroMessage({ message: mostroMessage, event: ev })
+    console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
     this.emit('mostro-message', mostroMessage, ev)
 
     // Check if this message is a response to a pending request
