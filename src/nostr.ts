@@ -46,12 +46,12 @@ interface NostrOptions {
   // Add any other runtime configurations you need
 }
 
-export class Nostr extends EventEmitter {
+export class Nostr extends EventEmitter<{ ready: () => void }> {
   private ndk: NDK
   private users = new Map<string, NDKUser>()
   private subscriptions: Map<number, NDKSubscription> = new Map()
-  private eventCallbacks: Map<number, EventCallback | GiftWrapCallback> = new Map()
   private mostroMessageCallback: (message: string, ev: MostroEvent) => void = () => {}
+  private publicMessageCallback: (ev: NDKEvent) => void = () => {}
   public mustKeepRelays: Set<string> = new Set()
   private _signer: NDKSigner | undefined
 
@@ -62,6 +62,10 @@ export class Nostr extends EventEmitter {
   // Queue for gift wraps in order to process past events in the chronological order
   private giftWrapQueue: NDKEvent[] = []
   private giftWrapEoseReceived: boolean = false
+
+  // Queue for order messages
+  private orderQueue: NDKEvent[] = []
+  private orderEoseReceived: boolean = false
 
   private options: NostrOptions
 
@@ -156,25 +160,16 @@ export class Nostr extends EventEmitter {
     return this._signer
   }
 
-  registerEventHandler(eventKind: number, callback: EventCallback | GiftWrapCallback) {
-    this.eventCallbacks.set(eventKind, callback)
-  }
-
   registerToMostroMessage(callback: (message: string, ev: MostroEvent) => void) {
     this.mostroMessageCallback = callback
   }
 
+  registerToPublicMessage(callback: (ev: NDKEvent) => void) {
+    this.publicMessageCallback = callback
+  }
+
   private async _handleEvent(event: NDKEvent, relay: NDKRelay | undefined, subscription: NDKSubscription) {
-    if (!event?.kind) {
-      console.warn(`🚨 No event kind found for event: `, event.rawEvent())
-      return
-    }
-    const callback = this.eventCallbacks.get(event.kind)
-    if (callback) {
-      (callback as EventCallback)(event)
-    } else {
-      console.warn(`🚨 No event callback set for kind ${event.kind}`)
-    }
+    this.publicMessageCallback(event)
   }
 
   private _handleDupEvent(
@@ -212,10 +207,23 @@ export class Nostr extends EventEmitter {
     }
   }
 
+  private _queueOrderEvent(event: NDKEvent) {
+    this.orderQueue.push(event)
+    if (this.orderEoseReceived) {
+      this._processQueuedOrders()
+    }
+  }
+
   private _handleDMEose() {
     console.warn('🔚 DM subscription eose')
     this.dmEoseReceived = true
     this._processQueuedEvents()
+  }
+
+  private _handleOrderEose() {
+    console.warn('🔚 order subscription eose')
+    this.orderEoseReceived = true
+    this._processQueuedOrders()
   }
 
   private async _handleGiftWrapEose() {
@@ -230,6 +238,14 @@ export class Nostr extends EventEmitter {
       this._handleEvent(event, undefined, this.subscriptions.get(NOSTR_ENCRYPTED_DM_KIND)!)
     }
     this.dmQueue = []
+  }
+
+  private _processQueuedOrders() {
+    this.orderQueue.sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
+    for (const event of this.orderQueue) {
+      this._handleEvent(event, undefined, this.subscriptions.get(NOSTR_REPLACEABLE_EVENT_KIND)!)
+    }
+    this.orderQueue = []
   }
 
   private async _processQueuedGiftWraps() {
@@ -257,8 +273,9 @@ export class Nostr extends EventEmitter {
     }
     if (!this.subscriptions.has(NOSTR_REPLACEABLE_EVENT_KIND)) {
       const subscription = this.ndk.subscribe(filters, { closeOnEose: false })
-      subscription.on('event', this._handleEvent.bind(this))
+      subscription.on('event', this._queueOrderEvent.bind(this))
       subscription.on('event:dup', this._handleDupEvent.bind(this))
+      subscription.on('eose', this._handleOrderEose.bind(this))
       subscription.on('close', this._handleCloseSubscription.bind(this))
       this.subscriptions.set(NOSTR_REPLACEABLE_EVENT_KIND, subscription)
     } else {
@@ -551,7 +568,7 @@ export class Nostr extends EventEmitter {
     event.content = cleartext
     event.pubkey = myPubKey
     event.tags = [['p', mostroPubKey]]
-    const nEvent = await event.toNostrEvent()
+    // const nEvent = await event.toNostrEvent()
     // console.info('> [🎁][me -> 🧌]: ', cleartext, ', ev: ', nEvent)
     return await this.signAndPublishEvent(event)
   }
