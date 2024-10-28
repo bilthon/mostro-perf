@@ -12,8 +12,6 @@ interface PendingRequest {
   timer: NodeJS.Timeout
 }
 
-export type MostroEvent = NDKEvent
-
 type MostroOptions = {
   mostroPubKey: string,
   relays: string,
@@ -273,7 +271,7 @@ export class Mostro extends EventEmitter<{
    * Handle messages from Mostro
    * @param message - The message content
    */
-  async handleMostroMessage(message: string, ev: MostroEvent) {
+  async handleMostroMessage(message: string, ev: NDKEvent) {
     const mostroMessage = JSON.parse(message) as MostroMessage
     const date = (new Date(ev.created_at as number * 1E3)).getTime()
     const now = new Date().getTime()

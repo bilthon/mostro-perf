@@ -3,7 +3,6 @@ import NDK, { NDKKind, NDKSubscription, NDKEvent, NDKRelay, type NDKUserProfile,
 import NDKCacheAdapterDexie from '@nostr-dev-kit/ndk-cache-dexie'
 import { generateSecretKey, getPublicKey, nip44, nip19, finalizeEvent, getEventHash, UnsignedEvent, NostrEvent, EventTemplate } from 'nostr-tools'
 import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
-import { MostroEvent } from './mostro'
 import { useAuth } from './stores/auth'
 
 /**
@@ -48,7 +47,7 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
   private ndk: NDK
   private users = new Map<string, NDKUser>()
   private subscriptions: Map<number, NDKSubscription> = new Map()
-  private mostroMessageCallback: (message: string, ev: MostroEvent) => void = () => {}
+  private mostroMessageCallback: (message: string, ev: NDKEvent) => void = () => {}
   private publicMessageCallback: (ev: NDKEvent) => void = () => {}
   public mustKeepRelays: Set<string> = new Set()
   private _signer: NDKSigner | undefined
@@ -154,7 +153,7 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     return this._signer
   }
 
-  registerToMostroMessage(callback: (message: string, ev: MostroEvent) => void) {
+  registerToMostroMessage(callback: (message: string, ev: NDKEvent) => void) {
     this.mostroMessageCallback = callback
   }
 
@@ -302,7 +301,7 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     const mostroNpub = this.options.mostroPubKey
     const mostroHex = nip19.decode(mostroNpub).data as string
     if (rumor.pubkey === mostroHex) {
-      this.mostroMessageCallback(rumor.content, rumor as MostroEvent)
+      this.mostroMessageCallback(rumor.content, rumor as NDKEvent)
     } else {
       // TODO: handle this
       console.warn('🚨 received gift wrap from unknown pubkey: ', rumor.pubkey)
