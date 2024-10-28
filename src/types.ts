@@ -1,6 +1,7 @@
 // import { reactive } from 'vue'
 // import type { AuthState } from './stores/auth'
-import type { MostroEvent } from './mostro'
+
+import { NDKEvent } from "@nostr-dev-kit/ndk"
 
 export type ThreadSummary = {
   orderId: string,
@@ -288,12 +289,6 @@ export interface RootState {
     notifications: Notification[]
   }
   auth: AuthState
-}
-export interface ScheduledOrderUpdatePayload {
-  orderId: string,
-  event: MostroEvent,
-  seller_pubkey?: string,
-  buyer_pubkey?: string
 }
 
 export interface EncryptedPrivateKey {
