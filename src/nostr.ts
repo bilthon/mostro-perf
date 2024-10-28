@@ -24,7 +24,6 @@ interface GetUserParams {
 // Message kinds
 type ExtendedNDKKind = NDKKind | 38383
 export const NOSTR_REPLACEABLE_EVENT_KIND: ExtendedNDKKind = 38383
-export const NOSTR_ENCRYPTED_DM_KIND = NDKKind.EncryptedDirectMessage
 export const NOSTR_SEAL_KIND = 13
 export const NOSTR_GIFT_WRAP_KIND = 1059
 
@@ -43,7 +42,6 @@ export type GiftWrapCallback = (rumor: Rumor, seal: NostrEvent) => Promise<void>
 interface NostrOptions {
   relays: string
   mostroPubKey: string
-  // Add any other runtime configurations you need
 }
 
 export class Nostr extends EventEmitter<{ ready: () => void }> {
@@ -54,10 +52,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
   private publicMessageCallback: (ev: NDKEvent) => void = () => {}
   public mustKeepRelays: Set<string> = new Set()
   private _signer: NDKSigner | undefined
-
-  // Queue for DMs in order to process past events in the chronological order
-  private dmQueue: NDKEvent[] = []
-  private dmEoseReceived: boolean = false
 
   // Queue for gift wraps in order to process past events in the chronological order
   private giftWrapQueue: NDKEvent[] = []
@@ -192,13 +186,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     }
   }
 
-  private _queuePrivateEvent(event: NDKEvent) {
-    this.dmQueue.push(event)
-    if (this.dmEoseReceived) {
-      this._processQueuedEvents()
-    }
-  }
-
   private async _queueGiftWrapEvent(event: NDKEvent) {
     // console.log('🎁 queueing gift wrap event')
     this.giftWrapQueue.push(event)
@@ -214,12 +201,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     }
   }
 
-  private _handleDMEose() {
-    console.warn('🔚 DM subscription eose')
-    this.dmEoseReceived = true
-    this._processQueuedEvents()
-  }
-
   private _handleOrderEose() {
     console.warn('🔚 order subscription eose')
     this.orderEoseReceived = true
@@ -230,14 +211,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     console.warn('🔚 gift wrap subscription eose')
     this.giftWrapEoseReceived = true
     await this._processQueuedGiftWraps()
-  }
-
-  private _processQueuedEvents() {
-    this.dmQueue.sort((a, b) => (a.created_at || 0) - (b.created_at || 0))
-    for (const event of this.dmQueue) {
-      this._handleEvent(event, undefined, this.subscriptions.get(NOSTR_ENCRYPTED_DM_KIND)!)
-    }
-    this.dmQueue = []
   }
 
   private _processQueuedOrders() {
@@ -283,25 +256,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     }
   }
 
-  subscribeDMs(myPubkey: string) {
-    console.log('📭 subscribing to DMs')
-    const filters = {
-      kinds: [NOSTR_ENCRYPTED_DM_KIND],
-      '#p': [myPubkey],
-      since: Math.floor(Date.now() / 1e3) - EVENT_INTEREST_WINDOW,
-    }
-    if (!this.subscriptions.has(NOSTR_ENCRYPTED_DM_KIND)) {
-      const subscription = this.ndk.subscribe(filters, { closeOnEose: false })
-      subscription.on('event', this._queuePrivateEvent.bind(this))
-      subscription.on('event:dup', this._handleDupEvent.bind(this))
-      subscription.on('eose', this._handleDMEose.bind(this))
-      subscription.on('close', this._handleCloseSubscription.bind(this))
-      this.subscriptions.set(NOSTR_ENCRYPTED_DM_KIND, subscription)
-    } else {
-      console.warn('❌ Attempting to subcribe to DMs when already subscribed')
-    }
-  }
-
   subscribeGiftWraps(myPubkey: string) {
     console.log('📣 subscribing to gift wraps')
     const filters = {
@@ -319,6 +273,15 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
       // this.registerEventHandler(NOSTR_GIFT_WRAP_KIND, this.handleGiftWrapEvent.bind(this))
     } else {
       console.warn('❌ Attempting to subcribe to gift wraps when already subscribed')
+    }
+  }
+
+  unsubscribeGiftWraps() {
+    console.log('🚫 unsubscribing from gift wraps')
+    const subscription = this.subscriptions.get(NOSTR_GIFT_WRAP_KIND)
+    if (subscription) {
+      subscription.stop()
+      this.subscriptions.delete(NOSTR_GIFT_WRAP_KIND)
     }
   }
 
@@ -344,17 +307,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
       // TODO: handle this
       console.warn('🚨 received gift wrap from unknown pubkey: ', rumor.pubkey)
     }
-  }
-
-  unsubscribeDMs() {
-    console.log('🚫 unsubscribing to DMs')
-    const subscription = this.subscriptions.get(NOSTR_ENCRYPTED_DM_KIND)
-    if (subscription) {
-      subscription.stop()
-      this.subscriptions.delete(NOSTR_ENCRYPTED_DM_KIND)
-    }
-    this.dmQueue = []
-    this.dmEoseReceived = false
   }
 
   async publishEvent(event: NDKEvent) {
@@ -498,57 +450,22 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
 
   updatePubKey(newPubKey: string | null | undefined) {
     if (newPubKey) {
-      this.subscribeDMs(newPubKey);
       this.subscribeGiftWraps(newPubKey);
     } else {
-      this.unsubscribeDMs();
-      // You might want to add an unsubscribeGiftWraps method if needed
+      this.unsubscribeGiftWraps()
     }
   }
 
-  async submitDirectMessage(message: string, destination: string, replyTo?: string): Promise<void> {
-    if (!this._signer) {
-      console.error('❗ No signer found')
-      return
-    }
-    const myPubkey = await this._signer.user().then(user => user.pubkey)
-    if (!myPubkey) {
-      console.error('❗ No pubkey found')
-      return
-    }
-    const destinationPubKey = nip19.decode(destination).data as string
-    const recipient = new NDKUser({ hexpubkey: destinationPubKey })
-    const ciphertext = await this._signer.encrypt(recipient, message)
-    const event = new NDKEvent(this.ndk)
-    event.kind = NOSTR_ENCRYPTED_DM_KIND
-    event.created_at = Math.floor(Date.now() / 1000)
-    event.content = ciphertext
-    event.pubkey = myPubkey
-    event.tags = [
-      ['p', destinationPubKey],
-      ['p', myPubkey]
-    ]
-    if (replyTo) {
-      event.tags.push(['e', replyTo, '', 'reply'])
-    }
-    await event.sign(this._signer)
-    await this.publishEvent(event)
-  }
-
-  async signAndPublishEvent(event: NDKEvent): Promise<void> {
+  async giftWrapAndPublishEvent(event: NDKEvent, destination: string): Promise<void> {
     if (this._signer instanceof NDKPrivateKeySigner) {
-      const mostroNpub = this.options.mostroPubKey
-      const mostroDecoded = nip19.decode(mostroNpub)
-      const mostroPubKey = mostroDecoded.data as string
-
       if (!this._signer.privateKey) {
         console.error('❗ No private key found')
         return
       }
       const privateKeyBuffer = Buffer.from(this._signer.privateKey, 'hex')
       const rumor = this.createRumor(event.rawEvent(), privateKeyBuffer)
-      const seal = this.createSeal(rumor, privateKeyBuffer, mostroPubKey)
-      const giftWrappedEvent = this.createWrap(seal, mostroPubKey)
+      const seal = this.createSeal(rumor, privateKeyBuffer, destination)
+      const giftWrappedEvent = this.createWrap(seal, destination)
       return await this.publishEvent(new NDKEvent(this.ndk, giftWrappedEvent))
     } else {
       throw new Error('NDKNip07Signer is no longer supported. Please use NDKPrivateKeySigner.')
@@ -570,6 +487,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     event.tags = [['p', mostroPubKey]]
     // const nEvent = await event.toNostrEvent()
     // console.info('> [🎁][me -> 🧌]: ', cleartext, ', ev: ', nEvent)
-    return await this.signAndPublishEvent(event)
+    return await this.giftWrapAndPublishEvent(event, mostroPubKey)
   }
 }
