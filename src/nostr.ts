@@ -456,6 +456,23 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     }
   }
 
+  getMyPubKey(): string {
+    if (this._signer instanceof NDKPrivateKeySigner && this._signer.privateKey) {
+      return getPublicKey(Buffer.from(this._signer.privateKey, 'hex'))
+    } else {
+      throw new Error('No signer available to get pubkey')
+    }
+  }
+
+  async sendDirectMessage(message: string, destination: string): Promise<void> {
+    const event = new NDKEvent(this.ndk)
+    event.kind = NDKKind.Text,
+    event.created_at = Math.floor(Date.now() / 1000)
+    event.content = message
+    event.pubkey = this.getMyPubKey()
+    return this.giftWrapAndPublishEvent(event, destination)
+  }
+
   async giftWrapAndPublishEvent(event: NDKEvent, destination: string): Promise<void> {
     if (this._signer instanceof NDKPrivateKeySigner) {
       if (!this._signer.privateKey) {

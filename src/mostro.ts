@@ -1,5 +1,5 @@
 import { EventEmitter } from 'tseep'
-import { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
+import { NDKEvent, NDKKind, NDKUser } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
 import { Nostr } from './nostr'
 import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage } from './types'
@@ -364,8 +364,8 @@ export class Mostro extends EventEmitter<{
     })
   }
 
-  async submitDirectMessage(message: string, npub: string, replyTo: string | undefined): Promise<void> {
-    await this.nostr.submitDirectMessage(message, npub, replyTo)
+  async submitDirectMessage(message: string, npub: string): Promise<void> {
+    await this.nostr.sendDirectMessage(message, npub)
   }
 
   getMostroPublicKey(type?: PublicKeyType): string {
