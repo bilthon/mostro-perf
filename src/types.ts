@@ -2,6 +2,7 @@
 // import type { AuthState } from './stores/auth'
 
 import { NDKEvent } from "@nostr-dev-kit/ndk"
+import { NostrEvent, UnsignedEvent } from "nostr-tools"
 
 export type ThreadSummary = {
   orderId: string,
@@ -352,3 +353,8 @@ export interface AuthState {
   pubKey: string | null,
   privKey: string | null
 }
+
+export type Rumor = UnsignedEvent & {id: string}
+export type Seal = NostrEvent
+
+export type UnwrappedEvent = { rumor: Rumor, seal: Seal }

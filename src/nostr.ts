@@ -4,6 +4,7 @@ import NDKCacheAdapterDexie from '@nostr-dev-kit/ndk-cache-dexie'
 import { generateSecretKey, getPublicKey, nip44, nip19, finalizeEvent, getEventHash, UnsignedEvent, NostrEvent, EventTemplate } from 'nostr-tools'
 import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
 import { useAuth } from './stores/auth'
+import { Rumor, Seal, UnwrappedEvent } from './types'
 
 /**
  * Maximum number of seconds to be returned in the initial query
@@ -32,11 +33,8 @@ interface NIP04Parties {
   recipient: NDKUser
 }
 
-type Rumor = UnsignedEvent & {id: string}
-type Seal = NostrEvent
-
 export type EventCallback = (event: NDKEvent) => Promise<void>
-export type GiftWrapCallback = (rumor: Rumor, seal: NostrEvent) => Promise<void>
+export type GiftWrapCallback = (rumor: Rumor, seal: Seal) => Promise<void>
 
 interface NostrOptions {
   relays: string
@@ -46,7 +44,7 @@ interface NostrOptions {
 export class Nostr extends EventEmitter<{
   'ready': () => void,
   'public-message': (event: NDKEvent) => void,
-  'private-message': (message: string, event: NDKEvent) => void
+  'private-message': (seal: Seal, rumor: Rumor) => void
 }> {
   private ndk: NDK
   private users = new Map<string, NDKUser>()
@@ -217,15 +215,17 @@ export class Nostr extends EventEmitter<{
   }
 
   private async _processQueuedGiftWraps() {
-    const rumorQueue: Rumor[] = []
+    const unwrappedEventQueue: UnwrappedEvent[] = []
     for (const event of this.giftWrapQueue) {
-      const { rumor } = await this.unwrapEvent(event)
-      rumorQueue.push(rumor)
+      const { rumor, seal } = await this.unwrapEvent(event)
+      unwrappedEventQueue.push({ rumor, seal })
     }
     // Sorting rumors by 'created_at' fields. We can only do this after unwrapping
-    rumorQueue.sort((a, b) => (a.created_at as number) - (b.created_at as number))
-    for (const rumor of rumorQueue) {
-      await this.handleGiftWrapEvent(rumor)
+    unwrappedEventQueue.sort((a, b) => (a.rumor.created_at as number) - (b.rumor.created_at as number))
+    for (const unwrappedEvent of unwrappedEventQueue) {
+      // await this.handleGiftWrapEvent(unwrappedEvent)
+      const { rumor, seal } = unwrappedEvent
+      this.emit('private-message', seal, rumor)
     }
     this.giftWrapQueue = []
   }
@@ -290,17 +290,6 @@ export class Nostr extends EventEmitter<{
       Buffer.from((this.signer as NDKPrivateKeySigner).privateKey?.toString() || '', 'hex')
     )
     return { rumor, seal: unwrappedSeal }
-  }
-
-  async handleGiftWrapEvent(rumor: Rumor) : Promise<void> {
-    const mostroNpub = this.options.mostroPubKey
-    const mostroHex = nip19.decode(mostroNpub).data as string
-    if (rumor.pubkey === mostroHex) {
-      // Emit private-message directly instead of calling handleMostroMessage
-      this.emit('private-message', rumor.content, rumor as NDKEvent)
-    } else {
-      console.warn('🚨 received gift wrap from unknown pubkey: ', rumor.pubkey)
-    }
   }
 
   async publishEvent(event: NDKEvent) {

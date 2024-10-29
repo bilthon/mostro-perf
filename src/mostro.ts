@@ -2,7 +2,7 @@ import { EventEmitter } from 'tseep'
 import { NDKEvent, NDKKind, NDKUser } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
 import { Nostr } from './nostr'
-import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage } from './types'
+import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage, Seal, Rumor } from './types'
 
 const REQUEST_TIMEOUT = 30000 // 30 seconds timeout
 
@@ -30,7 +30,7 @@ export enum PublicKeyType {
 
 export class Mostro extends EventEmitter<{
   'mostro-message': (mostroMessage: MostroMessage, ev: NDKEvent) => void,
-  'peer-message': (message: string, ev: NDKEvent) => void,
+  'peer-message': (seal: Seal, rumor: Rumor) => void,
   'order-update': (order: Order, ev: NDKEvent) => void,
   'info-update': (info: MostroInfo) => void
 }> {
@@ -273,14 +273,19 @@ export class Mostro extends EventEmitter<{
    * @param message - The message content
    * @param ev - The Nostr event
    */
-  async handlePrivateMessage(message: string, ev: NDKEvent) {
+  async handlePrivateMessage(seal: Seal, rumor: Rumor) {
+    if (rumor.pubkey !== seal.pubkey) {
+      console.warn('🚨 Mismatch between rumor and seal pubkeys: ', rumor.pubkey, ' != ', seal.pubkey)
+      return
+    }
+    const date = (new Date(rumor.created_at as number * 1E3)).getTime()
+    const now = new Date().getTime()
     // Check if this is a message from Mostro
-    if (ev.pubkey === this.getMostroPublicKey(PublicKeyType.HEX)) {
+    if (rumor.pubkey === this.getMostroPublicKey(PublicKeyType.HEX)) {
+      const message = rumor.content
       const mostroMessage = JSON.parse(message) as MostroMessage
-      const date = (new Date(ev.created_at as number * 1E3)).getTime()
-      const now = new Date().getTime()
-      console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
-      this.emit('mostro-message', mostroMessage, ev)
+      console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', rumor)
+      this.emit('mostro-message', mostroMessage, rumor as NDKEvent)
 
       // Check if this message is a response to a pending request
       const requestId = mostroMessage.order?.request_id
@@ -291,10 +296,10 @@ export class Mostro extends EventEmitter<{
         resolve(mostroMessage)
       }
     } else {
-      // Handle messages from other peers
-      // TODO: Implement peer-to-peer message handling
-      console.debug('Received message from peer:', ev.pubkey)
-      this.emit('peer-message', message, ev)
+      // Handle messages from other peers, emitting event to be handled
+      // by the responsible component
+      console.info(`[🎁][🍐 -> me] [d: ${now - date}]: `, rumor.content, rumor)
+      this.emit('peer-message', seal, rumor)
     }
   }
 
