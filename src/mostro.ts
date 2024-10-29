@@ -30,6 +30,7 @@ export enum PublicKeyType {
 
 export class Mostro extends EventEmitter<{
   'mostro-message': (mostroMessage: MostroMessage, ev: NDKEvent) => void,
+  'peer-message': (message: string, ev: NDKEvent) => void,
   'order-update': (order: Order, ev: NDKEvent) => void,
   'info-update': (info: MostroInfo) => void
 }> {
@@ -50,9 +51,9 @@ export class Mostro extends EventEmitter<{
 
     this.nostr = new Nostr({ relays: opts.relays, mostroPubKey: opts.mostroPubKey })
 
-    // Register Mostro-specific event handlers
-    this.nostr.registerToPublicMessage(this.handlePublicMessage.bind(this))
-    this.nostr.registerToMostroMessage(this.handleMostroMessage.bind(this))
+    // Update event listener names and handler
+    this.nostr.on('public-message', this.handlePublicMessage.bind(this))
+    this.nostr.on('private-message', this.handlePrivateMessage.bind(this))
 
     this.readyPromise = new Promise(resolve => this.readyResolve = resolve)
 
@@ -268,23 +269,32 @@ export class Mostro extends EventEmitter<{
   }
 
   /**
-   * Handle messages from Mostro
+   * Handle private messages from any peer
    * @param message - The message content
+   * @param ev - The Nostr event
    */
-  async handleMostroMessage(message: string, ev: NDKEvent) {
-    const mostroMessage = JSON.parse(message) as MostroMessage
-    const date = (new Date(ev.created_at as number * 1E3)).getTime()
-    const now = new Date().getTime()
-    console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
-    this.emit('mostro-message', mostroMessage, ev)
+  async handlePrivateMessage(message: string, ev: NDKEvent) {
+    // Check if this is a message from Mostro
+    if (ev.pubkey === this.getMostroPublicKey(PublicKeyType.HEX)) {
+      const mostroMessage = JSON.parse(message) as MostroMessage
+      const date = (new Date(ev.created_at as number * 1E3)).getTime()
+      const now = new Date().getTime()
+      console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', ev)
+      this.emit('mostro-message', mostroMessage, ev)
 
-    // Check if this message is a response to a pending request
-    const requestId = mostroMessage.order?.request_id
-    if (requestId && this.pendingRequests.has(requestId)) {
-      const { resolve, timer } = this.pendingRequests.get(requestId)!
-      clearTimeout(timer)
-      this.pendingRequests.delete(requestId)
-      resolve(mostroMessage)
+      // Check if this message is a response to a pending request
+      const requestId = mostroMessage.order?.request_id
+      if (requestId && this.pendingRequests.has(requestId)) {
+        const { resolve, timer } = this.pendingRequests.get(requestId)!
+        clearTimeout(timer)
+        this.pendingRequests.delete(requestId)
+        resolve(mostroMessage)
+      }
+    } else {
+      // Handle messages from other peers
+      // TODO: Implement peer-to-peer message handling
+      console.debug('Received message from peer:', ev.pubkey)
+      this.emit('peer-message', message, ev)
     }
   }
 

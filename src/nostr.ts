@@ -43,12 +43,14 @@ interface NostrOptions {
   mostroPubKey: string
 }
 
-export class Nostr extends EventEmitter<{ ready: () => void }> {
+export class Nostr extends EventEmitter<{
+  'ready': () => void,
+  'public-message': (event: NDKEvent) => void,
+  'private-message': (message: string, event: NDKEvent) => void
+}> {
   private ndk: NDK
   private users = new Map<string, NDKUser>()
   private subscriptions: Map<number, NDKSubscription> = new Map()
-  private mostroMessageCallback: (message: string, ev: NDKEvent) => void = () => {}
-  private publicMessageCallback: (ev: NDKEvent) => void = () => {}
   public mustKeepRelays: Set<string> = new Set()
   private _signer: NDKSigner | undefined
 
@@ -153,16 +155,10 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     return this._signer
   }
 
-  registerToMostroMessage(callback: (message: string, ev: NDKEvent) => void) {
-    this.mostroMessageCallback = callback
-  }
-
-  registerToPublicMessage(callback: (ev: NDKEvent) => void) {
-    this.publicMessageCallback = callback
-  }
-
+  // Instead of calling callbacks, emit events
   private async _handleEvent(event: NDKEvent, relay: NDKRelay | undefined, subscription: NDKSubscription) {
-    this.publicMessageCallback(event)
+    // Emit public-message directly instead of calling handlePublicMessage
+    this.emit('public-message', event)
   }
 
   private _handleDupEvent(
@@ -269,7 +265,6 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
       subscription.on('eose', this._handleGiftWrapEose.bind(this))
       subscription.on('close', this._handleCloseSubscription.bind(this))
       this.subscriptions.set(NOSTR_GIFT_WRAP_KIND, subscription)
-      // this.registerEventHandler(NOSTR_GIFT_WRAP_KIND, this.handleGiftWrapEvent.bind(this))
     } else {
       console.warn('❌ Attempting to subcribe to gift wraps when already subscribed')
     }
@@ -301,9 +296,9 @@ export class Nostr extends EventEmitter<{ ready: () => void }> {
     const mostroNpub = this.options.mostroPubKey
     const mostroHex = nip19.decode(mostroNpub).data as string
     if (rumor.pubkey === mostroHex) {
-      this.mostroMessageCallback(rumor.content, rumor as NDKEvent)
+      // Emit private-message directly instead of calling handleMostroMessage
+      this.emit('private-message', rumor.content, rumor as NDKEvent)
     } else {
-      // TODO: handle this
       console.warn('🚨 received gift wrap from unknown pubkey: ', rumor.pubkey)
     }
   }
