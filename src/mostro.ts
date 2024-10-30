@@ -15,7 +15,7 @@ interface PendingRequest {
 type MostroOptions = {
   mostroPubKey: string,
   relays: string,
-  // nostr: Nostr
+  debug?: boolean
 }
 
 type PublicKeyCache = {
@@ -38,6 +38,7 @@ export class Mostro extends EventEmitter<{
   nostr: Nostr
   orderMap = new Map<string, string>() // Maps order id -> event id
   pubkeyCache: PublicKeyCache = { npub: null, hex: null }
+  private debug: boolean
 
   private readyResolve!: () => void
   private readyPromise: Promise<void>
@@ -48,8 +49,13 @@ export class Mostro extends EventEmitter<{
   constructor(opts: MostroOptions) {
     super()
     this.mostro = opts.mostroPubKey
+    this.debug = opts.debug || false
 
-    this.nostr = new Nostr({ relays: opts.relays, mostroPubKey: opts.mostroPubKey })
+    this.nostr = new Nostr({ 
+      relays: opts.relays, 
+      mostroPubKey: opts.mostroPubKey,
+      debug: this.debug 
+    })
 
     // Update event listener names and handler
     this.nostr.on('public-message', this.handlePublicMessage.bind(this))
@@ -68,16 +74,17 @@ export class Mostro extends EventEmitter<{
         reject(new Error(`Timeout waiting for action ${action} for order ${orderId}`));
       }, timeout);
 
-      const handler = (mostroMessage: MostroMessage, _ev: NDKEvent) => {
+      const handler = (mostroMessage: MostroMessage, ev: NDKEvent) => {
         if (mostroMessage.order && 
             mostroMessage.order.action === action && 
             mostroMessage.order.id === orderId) {
-          clearTimeout(timer);
-          this.removeListener('mostro-message', handler);
-          resolve(mostroMessage);
+          clearTimeout(timer)
+          resolve(mostroMessage)
         } else {
-          console.warn(`Received unexpected action ${mostroMessage.order?.action} for order ${mostroMessage.order?.id}`)
+          console.warn(`Received unexpected action "${mostroMessage.order?.action}" for order "${mostroMessage.order?.id}", was expecting "${action}"`)
+          console.warn('MostroMessage: ', mostroMessage, ', ev: ', ev)
         }
+        this.removeListener('mostro-message', handler)
       };
 
       this.on('mostro-message', handler);
@@ -122,7 +129,7 @@ export class Mostro extends EventEmitter<{
   }
 
   onNostrReady() {
-    console.log('Mostro. Nostr is ready')
+    this.debug && console.log('Mostro. Nostr is ready')
     // Subscribe to orders
     this.nostr.subscribeOrders()
 
@@ -275,7 +282,7 @@ export class Mostro extends EventEmitter<{
    */
   async handlePrivateMessage(seal: Seal, rumor: Rumor) {
     if (rumor.pubkey !== seal.pubkey) {
-      console.warn('🚨 Mismatch between rumor and seal pubkeys: ', rumor.pubkey, ' != ', seal.pubkey)
+      this.debug && console.warn('🚨 Mismatch between rumor and seal pubkeys: ', rumor.pubkey, ' != ', seal.pubkey)
       return
     }
     const date = (new Date(rumor.created_at as number * 1E3)).getTime()
@@ -284,7 +291,7 @@ export class Mostro extends EventEmitter<{
     if (rumor.pubkey === this.getMostroPublicKey(PublicKeyType.HEX)) {
       const message = rumor.content
       const mostroMessage = JSON.parse(message) as MostroMessage
-      console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', rumor)
+      this.debug && console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', rumor)
       this.emit('mostro-message', mostroMessage, rumor as NDKEvent)
 
       // Check if this message is a response to a pending request

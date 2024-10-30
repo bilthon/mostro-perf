@@ -39,6 +39,7 @@ export type GiftWrapCallback = (rumor: Rumor, seal: Seal) => Promise<void>
 interface NostrOptions {
   relays: string
   mostroPubKey: string
+  debug?: boolean
 }
 
 export class Nostr extends EventEmitter<{
@@ -61,10 +62,12 @@ export class Nostr extends EventEmitter<{
   private orderEoseReceived: boolean = false
 
   private options: NostrOptions
+  private debug: boolean
 
   constructor(options: NostrOptions) {
     super()
     this.options = options
+    this.debug = options.debug || false
 
     let cacheAdapter = undefined
 
@@ -86,28 +89,28 @@ export class Nostr extends EventEmitter<{
       autoConnectUserRelays: true,
     })
     this.ndk.pool.on('connect', () => {
-      console.log(`🎉 connected to all relays`)
+      this.debug && console.log(`🎉 connected to all relays`)
       this.emit('ready')
     })
     this.ndk.pool.on('relay:connect', (relay: NDKRelay) => {
-      console.debug(`🔌 connected to relay: ${relay.url}`)
+      this.debug && console.debug(`🔌 connected to relay: ${relay.url}`)
     })
     this.ndk.pool.on('relay:connecting', (relay: NDKRelay) => {
-      console.debug(`🔗 connecting to relay: ${relay.url}...`)
+      this.debug && console.debug(`🔗 connecting to relay: ${relay.url}...`)
     })
     this.ndk.pool.on('relay:disconnect', (relay: NDKRelay) => {
-      console.debug(`🚨 disconnected from relay: ${relay.url}`)
+      this.debug && console.debug(`🚨 disconnected from relay: ${relay.url}`)
     })
     this.ndk.pool.on('relay:auth', (relay: NDKRelay, challenge: string) => {
-      console.debug(`🔑 relay ${relay.url} requires auth. Challenge: ${challenge}`)
+      this.debug && console.debug(`🔑 relay ${relay.url} requires auth. Challenge: ${challenge}`)
     })
     this.ndk.outboxPool?.on('relay:connect', (relay: NDKRelay) => {
-      console.log(`🎉 connected to outbox relay: ${relay.url}`)
+      this.debug && console.log(`🎉 connected to outbox relay: ${relay.url}`)
     })
 
     const { relays } = this.options
     for (const relay of relays.split(',')) {
-      console.log(`➕ adding relay: "${relay}"`)
+      this.debug && console.log(`➕ adding relay: "${relay}"`)
       if (relay.startsWith('ws://') || relay.startsWith('wss://')) {
         const ndkRelay = new NDKRelay(relay, undefined, this.ndk)
         this.ndk.pool.addRelay(ndkRelay, true)
@@ -126,7 +129,7 @@ export class Nostr extends EventEmitter<{
       this.users.set(user.pubkey, user)
       getRelayListForUser(user.pubkey, this.ndk).then((relayList: NDKRelayList | undefined) => {
         if (relayList) {
-          console.log(`🌐 Relay list for [${user.pubkey}]: `, relayList.tags.map(r => r[1]), `, from event: ${relayList.id} - [${relayList.created_at}]`)
+          this.debug && console.log(`🌐 Relay list for [${user.pubkey}]: `, relayList.tags.map(r => r[1]))
           for (const relayUrl of relayList.relays) {
             this.mustKeepRelays.add(relayUrl)
             const ndkRelay = new NDKRelay(relayUrl, undefined, this.ndk)
@@ -134,7 +137,7 @@ export class Nostr extends EventEmitter<{
             this.ndk.outboxPool?.addRelay(ndkRelay, true)
           }
         } else {
-          console.warn(`🚨 No relay list for user [${user.pubkey}], adding default relay`)
+          this.debug && console.warn(`🚨 No relay list for user [${user.pubkey}], adding default relay`)
           this.ndk.pool.addRelay(new NDKRelay('wss://relay.mostro.network', undefined, this.ndk), true)
         }
       })
@@ -169,7 +172,7 @@ export class Nostr extends EventEmitter<{
   }
 
   private _handleCloseSubscription(subscription: NDKSubscription) {
-    console.warn('🔚 subscription closed: ', subscription)
+    this.debug && console.warn('🔚 subscription closed: ', subscription)
     // Find the event kind associated with the closed subscription
     const eventKind = Array.from(this.subscriptions.entries()).find(([_, sub]) => sub === subscription)?.[0]
     if (eventKind !== undefined) {
@@ -180,7 +183,7 @@ export class Nostr extends EventEmitter<{
   }
 
   private async _queueGiftWrapEvent(event: NDKEvent) {
-    // console.log('🎁 queueing gift wrap event')
+    this.debug && console.log('🎁 queueing gift wrap event')
     this.giftWrapQueue.push(event)
     if (this.giftWrapEoseReceived) {
       await this._processQueuedGiftWraps()
@@ -195,13 +198,13 @@ export class Nostr extends EventEmitter<{
   }
 
   private _handleOrderEose() {
-    console.warn('🔚 order subscription eose')
+    this.debug && console.warn('🔚 order subscription eose')
     this.orderEoseReceived = true
     this._processQueuedOrders()
   }
 
   private async _handleGiftWrapEose() {
-    console.warn('🔚 gift wrap subscription eose')
+    this.debug && console.warn('🔚 gift wrap subscription eose')
     this.giftWrapEoseReceived = true
     await this._processQueuedGiftWraps()
   }
@@ -231,7 +234,7 @@ export class Nostr extends EventEmitter<{
   }
 
   subscribeOrders() {
-    console.log('📣 subscribing to orders')
+    this.debug && console.log('📣 subscribing to orders')
     const mostroNpub = this.options.mostroPubKey
     const mostroDecoded = nip19.decode(mostroNpub)
     const filters = {
@@ -252,7 +255,7 @@ export class Nostr extends EventEmitter<{
   }
 
   subscribeGiftWraps(myPubkey: string) {
-    console.log('📣 subscribing to gift wraps')
+    this.debug && console.log('📣 subscribing to gift wraps')
     const filters = {
       kinds: [NOSTR_GIFT_WRAP_KIND],
       '#p': [myPubkey],
@@ -296,7 +299,7 @@ export class Nostr extends EventEmitter<{
     try {
       const poolSize = this.ndk.pool.size()
       const relays = await event.publish()
-      // console.log(`📡 Event published to [${relays.size}/${poolSize}] relays`)
+      this.debug && console.log(`📡 Event published to [${relays.size}/${poolSize}] relays`)
     } catch (err) {
       console.error('Error publishing event: ', err)
     }
@@ -453,6 +456,8 @@ export class Nostr extends EventEmitter<{
     event.created_at = Math.floor(Date.now() / 1000)
     event.content = message
     event.pubkey = this.getMyPubKey()
+    const destinationEmoji = this.options.mostroPubKey === destination ? '🧌' : '👤'
+    this.debug && console.log(`💬 sending direct message to ${destinationEmoji}: ${message}`)
     return this.giftWrapAndPublishEvent(event, destination)
   }
 
@@ -485,8 +490,8 @@ export class Nostr extends EventEmitter<{
     event.content = cleartext
     event.pubkey = myPubKey
     event.tags = [['p', mostroPubKey]]
-    // const nEvent = await event.toNostrEvent()
-    // console.info('> [🎁][me -> 🧌]: ', cleartext, ', ev: ', nEvent)
+    const nEvent = await event.toNostrEvent()
+    this.debug && console.info('[🎁][me -> 🧌]: ', nEvent)
     return await this.giftWrapAndPublishEvent(event, mostroPubKey)
   }
 }
