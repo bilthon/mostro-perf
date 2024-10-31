@@ -3,7 +3,6 @@ import NDK, { NDKKind, NDKSubscription, NDKEvent, NDKRelay, type NDKUserProfile,
 import NDKCacheAdapterDexie from '@nostr-dev-kit/ndk-cache-dexie'
 import { generateSecretKey, getPublicKey, nip44, nip19, finalizeEvent, getEventHash, UnsignedEvent, NostrEvent, EventTemplate } from 'nostr-tools'
 import { NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
-import { useAuth } from './stores/auth'
 import { Rumor, Seal, UnwrappedEvent } from './types'
 
 /**
@@ -226,7 +225,6 @@ export class Nostr extends EventEmitter<{
     // Sorting rumors by 'created_at' fields. We can only do this after unwrapping
     unwrappedEventQueue.sort((a, b) => (a.rumor.created_at as number) - (b.rumor.created_at as number))
     for (const unwrappedEvent of unwrappedEventQueue) {
-      // await this.handleGiftWrapEvent(unwrappedEvent)
       const { rumor, seal } = unwrappedEvent
       this.emit('private-message', seal, rumor)
     }
@@ -320,13 +318,12 @@ export class Nostr extends EventEmitter<{
   }
 
   async decryptMessage(ev: NDKEvent): Promise<string> {
-    const authStore = useAuth()
     if (!this._signer) {
       throw new Error('No signer available to decrypt the message')
     }
     const { sender, recipient } = this.obtainParties(ev)
 
-    if (sender.pubkey === authStore.pubKey) {
+    if (sender.pubkey === this.getMyPubKey()) {
       // I was the sender
       return await this._signer.decrypt(recipient, ev.content)
     } else {
