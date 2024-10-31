@@ -1,5 +1,5 @@
 import { EventEmitter } from 'tseep'
-import { NDKEvent, NDKKind, NDKUser } from '@nostr-dev-kit/ndk'
+import { NDKEvent, NDKUser } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
 import { Nostr } from './nostr'
 import { Action, NewOrder, Order, OrderStatus, OrderType, MostroInfo, MostroMessage, Seal, Rumor } from './types'
@@ -32,7 +32,8 @@ export class Mostro extends EventEmitter<{
   'mostro-message': (mostroMessage: MostroMessage, ev: NDKEvent) => void,
   'peer-message': (seal: Seal, rumor: Rumor) => void,
   'order-update': (order: Order, ev: NDKEvent) => void,
-  'info-update': (info: MostroInfo) => void
+  'info-update': (info: MostroInfo) => void,
+  'ready': () => void
 }> {
   mostro: string
   nostr: Nostr
@@ -136,6 +137,10 @@ export class Mostro extends EventEmitter<{
     // Add Mostro user
     this.nostr.addUser(new NDKUser({ npub: this.mostro }))
 
+    // Emit ready event
+    this.emit('ready')
+
+    // Resolve ready promise
     this.readyResolve()
   }
 
