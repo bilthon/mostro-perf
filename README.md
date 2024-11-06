@@ -10,9 +10,9 @@ This tool measures the performance of key operations in both buyer-initiated and
 
 For each trade flow (both buyer and seller as maker), the following operations are timed:
 
-- `submit_order`: Time to submit a new order to the network
-- `take_sell`/`take_buy`: Time to accept an existing order
-- `add_invoice`: Time to add a Lightning invoice
+- `submit-order`: Time to submit a new order to the network
+- `take-sell`/`take-buy`: Time to accept an existing order
+- `add-invoice`: Time to add a Lightning invoice
 - `fiatsent`: Time to mark fiat as sent
 - `release`: Time to release funds
 
