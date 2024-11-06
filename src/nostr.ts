@@ -182,6 +182,17 @@ export class Nostr extends EventEmitter<{
   }
 
   private async _queueGiftWrapEvent(event: NDKEvent) {
+    const myPubKey = this.getMyPubKey()
+
+    // Check if event has a 'p' tag that matches our public key
+    const isForMe = event.tags.some(([tagName, tagValue]) =>
+      tagName === 'p' && tagValue === myPubKey
+    )
+
+    if (!isForMe) {
+      this.debug && console.log('🚫 Ignoring gift wrap event not intended for us')
+      return
+    }
     this.debug && console.log('🎁 queueing gift wrap event')
     this.giftWrapQueue.push(event)
     if (this.giftWrapEoseReceived) {
@@ -248,7 +259,7 @@ export class Nostr extends EventEmitter<{
       subscription.on('close', this._handleCloseSubscription.bind(this))
       this.subscriptions.set(NOSTR_REPLACEABLE_EVENT_KIND, subscription)
     } else {
-      console.warn('❌ Attempting to subcribe to orders when already subscribed')
+      this.debug && console.warn('❌ Attempting to subcribe to orders when already subscribed')
     }
   }
 
@@ -267,7 +278,7 @@ export class Nostr extends EventEmitter<{
       subscription.on('close', this._handleCloseSubscription.bind(this))
       this.subscriptions.set(NOSTR_GIFT_WRAP_KIND, subscription)
     } else {
-      console.warn('❌ Attempting to subcribe to gift wraps when already subscribed')
+      this.debug && console.warn('❌ Attempting to subcribe to gift wraps when already subscribed')
     }
   }
 

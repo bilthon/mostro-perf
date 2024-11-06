@@ -5,32 +5,23 @@ import { Mostro } from './mostro'
 import { Action, MostroMessage, NewOrder, Order, OrderStatus, OrderType } from './types'
 import { getInvoice, payInvoice } from './lightning'
 import * as fs from 'fs'
+import { PayViaPaymentRequestResult } from 'lightning'
 
-const time = console.time
-const timeEnd = console.timeEnd
-
-// const MOSTRO_NPUB = 'npub19m9laul6k463czdacwx5ta4ap43nlf3lr0p99mqugnz8mdz7wtvskkm5wg'
-const MOSTRO_NPUB = 'npub1dnsaeuyhwp2mtlttaqu6ulxuqg8gcpc2tdhu5qv9wfxjh5al0cfqqd59x3'
-// const RELAYS = 'wss://nostr.roundrockbitcoiners.com,wss://relay.mostro.network,wss://relay.nostr.net,wss://nostr.mutinywallet.com,wss://relay.piazza.today,wss://nostr.lu.ke'
-// const RELAYS = 'wss://relay.mostro.network,wss://algo.bilthon.dev'
-const RELAYS = 'wss://nostr.roundrockbitcoiners.com,wss://relay.mostro.network,wss://nostr.bilthon.dev'
+const MOSTRO_NPUB = 'npub178am9sl8hjcz90xvag4urz8fdn2wnw9lyeeez29gjrqczp932hxqcejd4y'
+const RELAYS = 'wss://relay.mostro.network,wss://nostr.bilthon.dev'
 const CSV_FILE = './output/mostro-rtt.csv'
 
-// Private keys
-const buyerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
-const sellerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
-
-async function waitSeconds(seconds: number) {
-  let counter = 0
-  console.log(`Waiting for ${counter} seconds...`)
-  while (counter < seconds) {
-    console.log(`${seconds - counter}`)
-    counter++
-    await new Promise(resolve => setTimeout(resolve, 1000))
-  }
+const printKeys = (buyerPrivateKey: string, sellerPrivateKey: string, mostroPubKey: string) => {
+  console.log(`🔑 mostro pubkey.... [${nip19.decode(mostroPubKey).data}] [${mostroPubKey}]`)
+  console.log(`🔑 buyer keys....... [private: ${buyerPrivateKey}, public: ${getPublicKey(Buffer.from(buyerPrivateKey, 'hex'))}]`)
+  console.log(`🔑 seller keys...... [private: ${sellerPrivateKey}, public: ${getPublicKey(Buffer.from(sellerPrivateKey, 'hex'))}]`)
 }
 
-async function runIteration(): Promise<{ [key: string]: number } | undefined> {
+async function runSellerAsMaker(): Promise<{ [key: string]: number } | undefined> {
+  // Private keys
+  const buyerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
+  const sellerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
+
   const measurements: { [key: string]: number } = {
     submit_order: 0,
     take_sell: 0,
@@ -39,31 +30,38 @@ async function runIteration(): Promise<{ [key: string]: number } | undefined> {
     release: 0
   }
 
-  console.log(`🔑 mostro pubkey.... [${nip19.decode(MOSTRO_NPUB).data}]`)
-  console.log(`🔑 buyer keys....... [private: ${buyerPrivateKey}, public: ${getPublicKey(Buffer.from(buyerPrivateKey, 'hex'))}]`)
-  console.log(`🔑 seller keys...... [private: ${sellerPrivateKey}, public: ${getPublicKey(Buffer.from(sellerPrivateKey, 'hex'))}]`)
+  printKeys(buyerPrivateKey, sellerPrivateKey, MOSTRO_NPUB)
 
   let order: Order | undefined
 
   // Initialize Buyer side
   const buyerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
-    relays: RELAYS
+    relays: RELAYS,
+    debug: false
   })
   await buyerMostro.connect()
   buyerMostro.updatePrivKey(buyerPrivateKey)
-
+  await new Promise(resolve => {
+    buyerMostro.on('ready', () => {
+      resolve(0)
+    })
+  })
 
   // Initialize Seller side
   const sellerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
-    relays: RELAYS
+    relays: RELAYS,
+    debug: false
   })
   await sellerMostro.connect()
   sellerMostro.updatePrivKey(sellerPrivateKey)
 
-  console.log('Waiting for 5 seconds before creating order...')
-  await waitSeconds(5)
+  await new Promise(resolve => {
+    sellerMostro.on('ready', () => {
+      resolve(0)
+    })
+  })
 
   // Create an order
   const testOrder: NewOrder = {
@@ -177,30 +175,168 @@ async function runIteration(): Promise<{ [key: string]: number } | undefined> {
   return measurements
 }
 
+async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined> {
+
+  // Private keys
+  const buyerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
+  const sellerPrivateKey = Buffer.from(generateSecretKey()).toString('hex')
+
+  const measurements: { [key: string]: number } = {
+    submit_order: 0,
+    take_buy: 0,
+    add_invoice: 0,
+    fiatsent: 0,
+    release: 0
+  }
+
+  printKeys(buyerPrivateKey, sellerPrivateKey, MOSTRO_NPUB)
+
+  let order: Order | undefined
+
+  // Initialize Buyer side
+  const buyerMostro = new Mostro({
+    mostroPubKey: MOSTRO_NPUB,
+    relays: RELAYS
+  })
+  await buyerMostro.connect()
+  buyerMostro.updatePrivKey(buyerPrivateKey)
+
+  // Initialize Seller side
+  const sellerMostro = new Mostro({
+    mostroPubKey: MOSTRO_NPUB,
+    relays: RELAYS
+  })
+  await sellerMostro.connect()
+  sellerMostro.updatePrivKey(sellerPrivateKey)
+
+  console.log('Connected to seller mostro')
+
+  // Create a buy order
+  const testOrder: NewOrder = {
+    kind: OrderType.BUY,
+    fiat_code: 'USD',
+    amount: 0,
+    fiat_amount: 0,
+    min_amount: 5,
+    max_amount: 20,
+    payment_method: 'cashapp',
+    premium: 3,
+    created_at: Date.now(),
+    status: OrderStatus.PENDING,
+  }
+
+  let response: MostroMessage
+
+  // Measure submit_order
+  const submitOrderStart = Date.now()
+  console.log('Submitting order...')
+  response = await buyerMostro.submitOrder(testOrder)
+  console.log('Order submitted!')
+  measurements.submit_order = Date.now() - submitOrderStart
+
+  if (response.order.content && response.order.content.order) {
+    order = response.order.content.order
+  } else {
+    console.warn('Got an unexpected response: ', response)
+    return
+  }
+
+  try {
+    // Measure take_buy
+    const takeBuyStart = Date.now()
+    response = await sellerMostro.takeBuy(order, 15)
+    measurements.take_buy = Date.now() - takeBuyStart
+  } catch (err) {
+    console.error('Error taking buy:', err)
+  }
+
+  await buyerMostro.waitForAction(Action.WaitingSellerToPay, order.id, 15000)
+
+  let hodlInvoicePromise: Promise<PayViaPaymentRequestResult> | undefined
+  if (response.order.action === 'pay-invoice' && response.order.content.payment_request) {
+    hodlInvoicePromise = payInvoice(response.order.content.payment_request[1] as string)
+    hodlInvoicePromise.then(res => console.log(`Payment from seller to mostro settled!`)).catch(console.error)
+  } else {
+    console.warn('Was expecting a pay-invoice action, but got: ', response)
+    return
+  }
+
+  const addInvoiceMsg = await buyerMostro.waitForAction(Action.AddInvoice, order.id, 60000)
+
+  let invoice: string | undefined
+  const sats = addInvoiceMsg.order?.content?.order?.amount
+  if (sats) {
+    const invoiceResult = await getInvoice(sats)
+    invoice = invoiceResult.request
+  } else {
+    console.warn('No sats to fetch invoice')
+    return
+  }
+
+  // Buyer adds invoice
+  const addInvoiceStart = Date.now()
+  await buyerMostro.addInvoice(order, invoice, sats)
+  measurements.add_invoice = Date.now() - addInvoiceStart
+
+  // Send fiatsent
+  try {
+    const fiatsentStart = Date.now()
+    await buyerMostro.fiatSent(order)
+    measurements.fiatsent = Date.now() - fiatsentStart
+  } catch (error) {
+    console.error('Error sending fiatsent:', error)
+    return
+  }
+
+  // Send release
+  try {
+    const releaseStart = Date.now()
+    await sellerMostro.release(order)
+    measurements.release = Date.now() - releaseStart
+  } catch (error) {
+    console.error('Error sending release:', error)
+    return
+  }
+
+  return measurements
+}
+
 async function main() {
   const iterations = 10 // Number of iterations to run
   const results: { [key: string]: number }[] = []
 
-  // Create CSV header
-  const csvHeader = 'submit_order,take_sell,add_invoice,fiatsent,release\n'
+  // Create CSV header with combined columns for both flows
+  const csvHeader = 'seller_submit_order,buyer_take_sell,seller_add_invoice,buyer_fiatsent,seller_release,' +
+                   'buyer_submit_order,seller_take_buy,buyer_add_invoice,buyer_fiatsent,seller_release\n'
   fs.writeFileSync(CSV_FILE, csvHeader)
 
-  for (let i = 0; i < iterations; i++) {
-    const measurement = await runIteration()
-    if (measurement) {
-      results.push(measurement)
+  let counter = 0
+  while (counter < iterations) {
+    try {
+      console.log(`///////////// Running seller as maker ///////////// ${counter + 1}`)
+      const sellMeasurement = await runSellerAsMaker()
+      console.log(`///////////// Running buyer as maker ///////////// ${counter + 1}`)
+      const buyMeasurement = await runBuyerAsMaker()
 
-      // Append result to CSV file
-      const csvLine = `${measurement.submit_order},${measurement.take_sell},${measurement.add_invoice},${measurement.fiatsent},${measurement.release}\n`
-      fs.appendFileSync(CSV_FILE, csvLine)
+      if (sellMeasurement && buyMeasurement) {
+        results.push({ ...sellMeasurement, ...buyMeasurement })
 
-      console.log(`Iteration ${i + 1} completed`)
-    } else {
-      console.error(`Iteration ${i + 1} failed`)
+        // Combine both measurements into a single CSV line
+        const csvLine = `${sellMeasurement.submit_order},${sellMeasurement.take_sell},${sellMeasurement.add_invoice},${sellMeasurement.fiatsent},${sellMeasurement.release},` +
+                       `${buyMeasurement.submit_order},${buyMeasurement.take_buy},${buyMeasurement.add_invoice},${buyMeasurement.fiatsent},${buyMeasurement.release}\n`
+        fs.appendFileSync(CSV_FILE, csvLine)
+
+        console.log(`Iteration ${counter + 1} completed (both flows)`)
+      } else {
+        console.error(`Iteration ${counter + 1} failed`)
+        if (!sellMeasurement) console.error('Seller as maker flow failed')
+        if (!buyMeasurement) console.error('Buyer as maker flow failed')
+      }
+
+      counter++
+    } catch (err) {
+      console.error(`Error running iteration: ${counter + 1}`, err)
     }
-
-    // Wait for a short time between iterations
-    await waitSeconds(5)
   }
   console.log(`All iterations completed. Results saved to ${CSV_FILE}`)
 }
