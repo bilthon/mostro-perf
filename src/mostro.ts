@@ -286,7 +286,6 @@ export class Mostro extends EventEmitter<{
    * @param ev - The Nostr event
    */
   async handlePrivateMessage(seal: Seal, rumor: Rumor) {
-    console.info('[🎁]: ', rumor.content, rumor)
     if (rumor.pubkey !== seal.pubkey) {
       this.debug && console.warn('🚨 Mismatch between rumor and seal pubkeys: ', rumor.pubkey, ' != ', seal.pubkey)
       return
@@ -295,7 +294,6 @@ export class Mostro extends EventEmitter<{
     const now = new Date().getTime()
     // Check if this is a message from Mostro
     if (rumor.pubkey === this.getMostroPublicKey(PublicKeyType.HEX)) {
-      console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, rumor.content, rumor)
       const message = rumor.content
       const mostroMessage = JSON.parse(message) as MostroMessage
       this.debug && console.info(`[🎁][🧌 -> me] [d: ${now - date}]: `, mostroMessage, ', ev: ', rumor)
