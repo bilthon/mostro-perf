@@ -6,15 +6,26 @@ import { Action, MostroMessage, NewOrder, Order, OrderStatus, OrderType } from '
 import { getInvoice, payInvoice } from './lightning'
 import * as fs from 'fs'
 import { PayViaPaymentRequestResult } from 'lightning'
+import pc from 'picocolors'
 
 const MOSTRO_NPUB = 'npub178am9sl8hjcz90xvag4urz8fdn2wnw9lyeeez29gjrqczp932hxqcejd4y'
 const RELAYS = 'wss://relay.mostro.network,wss://nostr.bilthon.dev'
 const CSV_FILE = './output/mostro-rtt.csv'
 
 const printKeys = (buyerPrivateKey: string, sellerPrivateKey: string, mostroPubKey: string) => {
-  console.log(`🔑 mostro pubkey.... [${nip19.decode(mostroPubKey).data}] [${mostroPubKey}]`)
-  console.log(`🔑 buyer keys....... [private: ${buyerPrivateKey}, public: ${getPublicKey(Buffer.from(buyerPrivateKey, 'hex'))}]`)
-  console.log(`🔑 seller keys...... [private: ${sellerPrivateKey}, public: ${getPublicKey(Buffer.from(sellerPrivateKey, 'hex'))}]`)
+  console.log(pc.bold('\n🔑 Keys Information:'))
+  console.log(pc.cyan('┌───────────────────────────────────────────────────────────────────────────────────┐'))
+  console.log(pc.cyan('│') + ` Mostro Pubkey:  ${pc.yellow(nip19.decode(mostroPubKey).data as string)}`);
+  console.log(pc.cyan('│') + ` npub:          ${pc.gray(mostroPubKey)}`);
+  console.log(pc.cyan('│'))
+  console.log(pc.cyan('│') + ` Buyer Keys:`);
+  console.log(pc.cyan('│') + `   Private:     ${pc.yellow(buyerPrivateKey)}`);
+  console.log(pc.cyan('│') + `   Public:      ${pc.gray(getPublicKey(Buffer.from(buyerPrivateKey, 'hex')))}`);
+  console.log(pc.cyan('│'))
+  console.log(pc.cyan('│') + ` Seller Keys:`);
+  console.log(pc.cyan('│') + `   Private:     ${pc.yellow(sellerPrivateKey)}`);
+  console.log(pc.cyan('│') + `   Public:      ${pc.gray(getPublicKey(Buffer.from(sellerPrivateKey, 'hex')))}`);
+  console.log(pc.cyan('└───────────────────────────────────────────────────────────────────────────────────┘'))
 }
 
 async function runSellerAsMaker(): Promise<{ [key: string]: number } | undefined> {
@@ -60,6 +71,17 @@ async function runSellerAsMaker(): Promise<{ [key: string]: number } | undefined
   })
   await sellerMostro.connect()
   sellerMostro.updatePrivKey(sellerPrivateKey)
+
+  // Override logging functions with colored versions
+  buyerMostro.logIncoming = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.green(`<< [${buyerMostro.name}] [${requestId}], ${msg}`)))
+  buyerMostro.logOutgoing = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.red(`>> [${buyerMostro.name}] [${requestId}], ${msg}`)))
+
+  sellerMostro.logIncoming = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.green(`<< [${sellerMostro.name}] [${requestId}], ${msg}`)))
+  sellerMostro.logOutgoing = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.red(`>> [${sellerMostro.name}] [${requestId}], ${msg}`)))
 
   await new Promise(resolve => {
     sellerMostro.on('ready', () => {
@@ -219,7 +241,16 @@ async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined>
   await sellerMostro.connect()
   sellerMostro.updatePrivKey(sellerPrivateKey)
 
-  console.log('Connected to seller mostro')
+  // Override logging functions with colored versions
+  buyerMostro.logIncoming = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.green(`<< [${buyerMostro.name}] [${requestId}], ${msg}`)))
+  buyerMostro.logOutgoing = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.red(`>> [${buyerMostro.name}] [${requestId}], ${msg}`)))
+
+  sellerMostro.logIncoming = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.green(`<< [${sellerMostro.name}] [${requestId}], ${msg}`)))
+  sellerMostro.logOutgoing = (requestId: number, msg: string) => 
+    console.log(pc.bold(pc.red(`>> [${sellerMostro.name}] [${requestId}], ${msg}`)))
 
   // Create a buy order
   const testOrder: NewOrder = {

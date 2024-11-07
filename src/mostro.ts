@@ -97,6 +97,9 @@ export class Mostro extends EventEmitter<{
     });
   }
 
+  public logIncoming = (requestId: number, msg: string) => console.log(`<< [${this.name}] [${requestId}], ${msg}`)
+  public logOutgoing = (requestId: number, msg: string) => console.log(`>> [${this.name}] [${requestId}], ${msg}`)
+
   private getNextRequestId(): number {
     return this.nextRequestId++
   }
@@ -306,7 +309,7 @@ export class Mostro extends EventEmitter<{
 
       // Check if this message is a response to a pending request
       const requestId = mostroMessage.order?.request_id
-      console.log(`<< [${this.name}] [${requestId}], payload: `, JSON.stringify(JSON.parse(rumor.content), null, 2))
+      this.logIncoming(requestId, `payload: ${JSON.stringify(JSON.parse(rumor.content), null, 2)}`)
       if (!requestId) {
         // If no request id was provided, there's no need to resolve a promise or look for a pending request
         // This was an unprompted message from Mostro. We should not resolve any promises here.
@@ -330,7 +333,7 @@ export class Mostro extends EventEmitter<{
 
   private async sendMostroRequest(action: Action, payload: any): Promise<MostroMessage> {
     const [requestId, promise] = this.createPendingRequest()
-    console.log(`>> [${this.name}] [${requestId}], action: `, action, ', payload: ', JSON.stringify(payload, null, 2))
+    this.logOutgoing(requestId, `action: ${action}, payload: ${JSON.stringify(payload, null, 2)}`)
     const fullPayload = {
       order: {
         version: 1,
