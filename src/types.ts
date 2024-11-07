@@ -1,16 +1,10 @@
-// import { reactive } from 'vue'
-// import type { AuthState } from './stores/auth'
-
-import { NDKEvent } from "@nostr-dev-kit/ndk"
-import { NostrEvent, UnsignedEvent } from "nostr-tools"
+import { NostrEvent, UnsignedEvent } from 'nostr-tools'
 
 export type ThreadSummary = {
   orderId: string,
   order: Order,
   messageCount: number
 }
-
-// Mostro messages
 
 type NullableOrder = Order | null
 type PaymentRequest = [NullableOrder, string]
@@ -356,5 +350,4 @@ export interface AuthState {
 
 export type Rumor = UnsignedEvent & {id: string}
 export type Seal = NostrEvent
-
 export type UnwrappedEvent = { rumor: Rumor, seal: Seal }
