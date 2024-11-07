@@ -13,9 +13,11 @@ interface PendingRequest {
 }
 
 type MostroOptions = {
+  name?: string,
   mostroPubKey: string,
   relays: string,
-  debug?: boolean
+  debug?: boolean,
+  baseRequestId?: number
 }
 
 type PublicKeyCache = {
@@ -35,7 +37,8 @@ export class Mostro extends EventEmitter<{
   'info-update': (info: MostroInfo) => void,
   'ready': () => void
 }> {
-  mostro: string
+  mostro: string // Mostro pubkey
+  name?: string = '' // Mostro name
   nostr: Nostr
   orderMap = new Map<string, string>() // Maps order id -> event id
   pubkeyCache: PublicKeyCache = { npub: null, hex: null }
@@ -45,11 +48,13 @@ export class Mostro extends EventEmitter<{
   private readyPromise: Promise<void>
 
   private pendingRequests: Map<number, PendingRequest> = new Map()
-  private nextRequestId: number = 1
+  private nextRequestId: number
 
   constructor(opts: MostroOptions) {
     super()
+    this.nextRequestId = opts.baseRequestId || Math.floor(Math.random() * 1000000)
     this.mostro = opts.mostroPubKey
+    this.name = opts.name
     this.debug = opts.debug || false
 
     this.nostr = new Nostr({ 
@@ -301,13 +306,19 @@ export class Mostro extends EventEmitter<{
 
       // Check if this message is a response to a pending request
       const requestId = mostroMessage.order?.request_id
-      if (requestId && this.pendingRequests.has(requestId)) {
+      console.log(`<< [${this.name}] [${requestId}], payload: `, JSON.stringify(JSON.parse(rumor.content), null, 2))
+      if (!requestId) {
+        // If no request id was provided, there's no need to resolve a promise or look for a pending request
+        // This was an unprompted message from Mostro. We should not resolve any promises here.
+        return
+      }
+      if (this.pendingRequests.has(requestId)) {
         const { resolve, timer } = this.pendingRequests.get(requestId)!
         clearTimeout(timer)
         this.pendingRequests.delete(requestId)
         resolve(mostroMessage)
       } else {
-        console.warn('🚨 Missing request id or no pending request found for request id: ', requestId)
+        console.warn('🚨 Missing request id or no pending request found for request id: ', requestId, ', pending requests: ', this.pendingRequests.keys())
       }
     } else {
       // Handle messages from other peers, emitting event to be handled
@@ -319,6 +330,7 @@ export class Mostro extends EventEmitter<{
 
   private async sendMostroRequest(action: Action, payload: any): Promise<MostroMessage> {
     const [requestId, promise] = this.createPendingRequest()
+    console.log(`>> [${this.name}] [${requestId}], action: `, action, ', payload: ', JSON.stringify(payload, null, 2))
     const fullPayload = {
       order: {
         version: 1,

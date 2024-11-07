@@ -38,7 +38,9 @@ async function runSellerAsMaker(): Promise<{ [key: string]: number } | undefined
   const buyerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
     relays: RELAYS,
-    debug: false
+    debug: false,
+    baseRequestId: 1000000,
+    name: 'buyer'
   })
   await buyerMostro.connect()
   buyerMostro.updatePrivKey(buyerPrivateKey)
@@ -52,7 +54,9 @@ async function runSellerAsMaker(): Promise<{ [key: string]: number } | undefined
   const sellerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
     relays: RELAYS,
-    debug: false
+    debug: false,
+    baseRequestId: 10,
+    name: 'seller'
   })
   await sellerMostro.connect()
   sellerMostro.updatePrivKey(sellerPrivateKey)
@@ -196,7 +200,10 @@ async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined>
   // Initialize Buyer side
   const buyerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
-    relays: RELAYS
+    relays: RELAYS,
+    baseRequestId: 500,
+    debug: false,
+    name: 'buyer'
   })
   await buyerMostro.connect()
   buyerMostro.updatePrivKey(buyerPrivateKey)
@@ -204,7 +211,10 @@ async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined>
   // Initialize Seller side
   const sellerMostro = new Mostro({
     mostroPubKey: MOSTRO_NPUB,
-    relays: RELAYS
+    relays: RELAYS,
+    baseRequestId: 200,
+    debug: false,
+    name: 'seller'
   })
   await sellerMostro.connect()
   sellerMostro.updatePrivKey(sellerPrivateKey)
@@ -229,9 +239,7 @@ async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined>
 
   // Measure submit_order
   const submitOrderStart = Date.now()
-  console.log('Submitting order...')
   response = await buyerMostro.submitOrder(testOrder)
-  console.log('Order submitted!')
   measurements.submit_order = Date.now() - submitOrderStart
 
   if (response.order.content && response.order.content.order) {
@@ -302,7 +310,7 @@ async function runBuyerAsMaker(): Promise<{ [key: string]: number } | undefined>
 }
 
 async function main() {
-  const iterations = 10 // Number of iterations to run
+  const iterations = 1 // Number of iterations to run
   const results: { [key: string]: number }[] = []
 
   // Create CSV header with combined columns for both flows
