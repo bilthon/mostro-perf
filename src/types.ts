@@ -1,3 +1,4 @@
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { NostrEvent, UnsignedEvent } from 'nostr-tools'
 
 export type ThreadSummary = {
@@ -348,6 +349,7 @@ export interface AuthState {
   privKey: string | null
 }
 
+export type GiftWrap = NDKEvent
 export type Rumor = UnsignedEvent & {id: string}
 export type Seal = NostrEvent
-export type UnwrappedEvent = { rumor: Rumor, seal: Seal }
+export type UnwrappedEvent = { gift: GiftWrap, rumor: Rumor, seal: Seal }

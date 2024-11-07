@@ -231,13 +231,18 @@ export class Nostr extends EventEmitter<{
     const unwrappedEventQueue: UnwrappedEvent[] = []
     for (const event of this.giftWrapQueue) {
       const { rumor, seal } = await this.unwrapEvent(event)
-      unwrappedEventQueue.push({ rumor, seal })
+      unwrappedEventQueue.push({ gift: event, rumor, seal })
     }
     // Sorting rumors by 'created_at' fields. We can only do this after unwrapping
     unwrappedEventQueue.sort((a, b) => (a.rumor.created_at as number) - (b.rumor.created_at as number))
     for (const unwrappedEvent of unwrappedEventQueue) {
-      const { rumor, seal } = unwrappedEvent
-      this.emit('private-message', seal, rumor)
+      const { gift, rumor, seal } = unwrappedEvent
+      const recipientPubKey = gift.tags.find(([tagName, _tagValue]) => tagName === 'p')?.[1]
+      if (recipientPubKey === this.getMyPubKey()) {
+        this.emit('private-message', seal, rumor)
+      } else {
+        console.warn(`🚨 Ignoring gift wrap for ${recipientPubKey}, my pubkey: ${this.getMyPubKey()}, rumor: `, JSON.parse(rumor.content))
+      }
     }
     this.giftWrapQueue = []
   }
