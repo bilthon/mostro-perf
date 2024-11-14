@@ -4,8 +4,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "ts-node src/main.ts",
-    "postinstall": "node ./node_modules/vue-demi/scripts/postinstall.js"
+    "start": "ts-node src/main.ts"
   },
   "keywords": [],
   "author": "",

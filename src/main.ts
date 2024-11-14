@@ -5,12 +5,14 @@ import { Mostro } from './mostro'
 import { Action, MostroMessage, NewOrder, Order, OrderStatus, OrderType } from './types'
 import { getInvoice, payInvoice } from './lightning'
 import * as fs from 'fs'
+import path from 'path'
 import { PayViaPaymentRequestResult } from 'lightning'
 import pc from 'picocolors'
 
 const MOSTRO_NPUB = 'npub178am9sl8hjcz90xvag4urz8fdn2wnw9lyeeez29gjrqczp932hxqcejd4y'
 const RELAYS = 'wss://relay.mostro.network,wss://nostr.bilthon.dev'
-const CSV_FILE = './output/mostro-rtt.csv'
+const OUTPUT_DIR = 'output'
+const CSV_FILE = 'mostro-rtt.csv'
 
 const printKeys = (buyerPrivateKey: string, sellerPrivateKey: string, mostroPubKey: string) => {
   console.log(pc.bold('\n🔑 Keys Information:'))
@@ -347,7 +349,10 @@ async function main() {
   // Create CSV header with combined columns for both flows
   const csvHeader = 'seller_submit_order,buyer_take_sell,seller_add_invoice,buyer_fiatsent,seller_release,' +
                    'buyer_submit_order,seller_take_buy,buyer_add_invoice,buyer_fiatsent,seller_release\n'
-  fs.writeFileSync(CSV_FILE, csvHeader)
+  if (!fs.existsSync(OUTPUT_DIR)) {
+    fs.mkdirSync(OUTPUT_DIR);
+  }
+  fs.writeFileSync(path.join(OUTPUT_DIR, CSV_FILE), csvHeader)
 
   let counter = 0
   while (counter < iterations) {

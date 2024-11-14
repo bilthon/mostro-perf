@@ -22,9 +22,19 @@ For each trade flow (both buyer and seller as maker), the following operations a
 - A Lightning node (LND) with API access
 - Access to Mostro relays
 
+## Environment Variables
+
+Create a `.env` file with your Lightning node configuration:
+
+```
+LND_HOST=host:port
+```
+
 ## Setup
 
-1. Create an `lnd` directory in your project root:
+1. Create an `lnd` directory in your project root.
+2. Copy your LND TLS certificate and admin macaroon into the `lnd` directory
+3. Run `npm install` to install dependencies
 
 ## Configuration
 
@@ -34,8 +44,8 @@ The tool uses the following configuration:
 - Secondary relay: `wss://nostr.bilthon.dev`
 - Output file: `./output/mostro-rtt.csv`
 
-## Environment Variables
+## Usage
 
-Create a `.env` file with your Lightning node configuration:
-
-LND_GRPC_HOST=your-lnd-host
+```bash
+npm start
+```
